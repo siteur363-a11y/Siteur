@@ -5,10 +5,9 @@ import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useGeolocation } from '../hooks/useGeolocation';
 import type { RecoletBoite } from '../types/database';
 import { offlineDb } from '../db/offlineDb';
-import { useSyncQueue } from '../hooks/useSyncQueue';
 import imageCompression from 'browser-image-compression';
 
-// --- NOUVEAUX IMPORTS HORS-LIGNE ---
+// --- IMPORTS HORS-LIGNE & CARTOGRAPHIE ---
 import * as turf from '@turf/turf';
 import 'leaflet.offline';
 
@@ -63,13 +62,12 @@ function ZoomIndicator() {
     );
 }
 
-// --- NOUVEAU COMPOSANT : GESTIONNAIRE DE CARTE HORS-LIGNE ---
+// GESTIONNAIRE DE CARTE HORS-LIGNE
 function OfflineMapManager() {
     const map = useMap();
 
     useEffect(() => {
-        // 1. Initialisation de la couche hors-ligne
-        // @ts-ignore : On ignore l'erreur TS car leaflet.offline modifie le prototype L globalement
+        // @ts-ignore
         const offlineLayer = L.tileLayer.offline('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '&copy; OpenStreetMap (Cache Offline)'
@@ -77,10 +75,9 @@ function OfflineMapManager() {
 
         offlineLayer.addTo(map);
 
-        // 2. Ajout du bouton de téléchargement sur la carte
         // @ts-ignore
         const saveControl = L.control.savetiles(offlineLayer, {
-            zoomlevels: [16, 17, 18, 19], // On stocke uniquement les zooms très précis pour le terrain
+            zoomlevels: [16, 17, 18, 19],
             confirm(info: any, savetiles: any) {
                 if (window.confirm(`Télécharger ${info._tilesforSave.length} tuiles cartographiques pour le mode hors-ligne ?`)) {
                     savetiles();
@@ -133,13 +130,37 @@ const uploadToCloudinary = async (file: File): Promise<string | null> => {
 export default function SaisieRecolement() {
     const isOnline = useOnlineStatus();
     const { location, requestLocation } = useGeolocation();
-    useSyncQueue();
 
     const [activeTab, setActiveTab] = useState<'saisie' | 'historique'>('saisie');
     const [historique, setHistorique] = useState<any[]>([]);
     const [isLoadingHist, setIsLoadingHist] = useState(false);
     const [editId, setEditId] = useState<string | number | null>(null);
 
+    // Compteur de fiches hors-ligne en attente d'export
+    const [pendingCount, setPendingCount] = useState<number>(0);
+
+    // États pour le Modal d'Exportation In-Line
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+    const [pendingItems, setPendingItems] = useState<any[]>([]);
+    const [currentExportIndex, setCurrentExportIndex] = useState<number>(0);
+    const [exportForm, setExportForm] = useState<RecoletBoite | null>(null);
+    const [enriching, setEnriching] = useState<boolean>(false);
+    const [isExporting, setIsExporting] = useState<boolean>(false);
+    const [suggestions, setSuggestions] = useState<{
+        commune?: string;
+        voie_numero?: string;
+        voie_nom?: string;
+        section_cadastrale?: string;
+        parcelle_cadastrale?: string;
+        id_ouvrage?: string;
+    }>({});
+    const [exportPhotoPreviews, setExportPhotoPreviews] = useState<{
+        situation: string | null;
+        couvercle: string | null;
+        interieur: string | null;
+    }>({ situation: null, couvercle: null, interieur: null });
+
+    // Repères Modal
     const [isRepereModalOpen, setIsRepereModalOpen] = useState(false);
     const [reperesList, setReperesList] = useState<any[]>([]);
     const [currentRepere, setCurrentRepere] = useState({
@@ -181,6 +202,22 @@ export default function SaisieRecolement() {
     const lastFetchedCoords = useRef<{ lat: number; lon: number } | null>(null);
     const formValues = watch();
 
+    // Rafraîchissement du nombre de fiches en attente
+    const refreshPendingCount = async () => {
+        try {
+            const count = await offlineDb.pendingSync.count();
+            setPendingCount(count);
+        } catch (err) {
+            console.error("Erreur lecture fiches hors-ligne :", err);
+        }
+    };
+
+    useEffect(() => {
+        refreshPendingCount();
+        const interval = setInterval(refreshPendingCount, 4000);
+        return () => clearInterval(interval);
+    }, []);
+
     useEffect(() => {
         if (activeTab === 'historique' && isOnline) {
             fetchHistorique();
@@ -201,81 +238,223 @@ export default function SaisieRecolement() {
         setIsLoadingHist(false);
     };
 
-// --- FONCTION D'IMPORTATION DES DONNÉES HORS-LIGNE (PARCELLES GEOJSON & ADRESSES CSV BAL) ---
-    const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>, type: 'parcelles' | 'adresses') => {
-        const file = e.target.files?.[0];
-        if (!file) return;
+    // --- LOGIQUE DE L'EXPORTATION IN-LINE PAS-À-PAS ---
+    const handleOpenExportModal = async () => {
+        const items = await offlineDb.pendingSync.toArray();
+        if (items.length === 0) {
+            alert("Aucune fiche en attente d'exportation.");
+            return;
+        }
+        setPendingItems(items);
+        setCurrentExportIndex(0);
+        setIsExportModalOpen(true);
+        loadExportItemAtIndex(0, items);
+    };
 
-        try {
-            const text = await file.text();
+    const loadExportItemAtIndex = (index: number, itemsList: any[]) => {
+        const pendingItem = itemsList[index];
+        if (!pendingItem) return;
 
-            if (type === 'parcelles') {
-                const json = JSON.parse(text);
-                if (!json.features || !Array.isArray(json.features)) {
-                    alert("Format GeoJSON invalide.");
-                    return;
-                }
-                const parcellesToInsert = json.features.map((feat: any) => ({
-                    section: feat.properties.section,
-                    numero: feat.properties.numero,
-                    codeInsee: feat.properties.code_insee || feat.properties.insee,
-                    geom: feat.geometry
-                }));
-                await offlineDb.parcelles.clear();
-                await offlineDb.parcelles.bulkAdd(parcellesToInsert);
-                alert(`✅ ${parcellesToInsert.length} parcelles stockées hors-ligne !`);
-            } 
-            else if (type === 'adresses') {
-                // Lecture du fichier CSV BAL
-                const lines = text.split('\n').filter(line => line.trim() !== '');
-                if (lines.length < 2) {
-                    alert("Fichier CSV vide ou invalide.");
-                    return;
-                }
+        const formData = { ...pendingItem.data };
+        setExportForm(formData);
 
-                const headers = lines[0].split(';').map(h => h.trim());
-                const latIdx = headers.indexOf('lat');
-                const longIdx = headers.indexOf('long');
-                const numeroIdx = headers.indexOf('numero');
-                const voieNomIdx = headers.indexOf('voie_nom');
-                const communeNomIdx = headers.indexOf('commune_nom');
+        // Préparation des aperçus photos
+        const situationUrl = pendingItem.localPhotos?.situation
+            ? URL.createObjectURL(pendingItem.localPhotos.situation)
+            : formData.photo_situation_url || null;
 
-                if (latIdx === -1 || longIdx === -1) {
-                    alert("Colonnes 'lat' ou 'long' introuvables dans le fichier CSV BAL.");
-                    return;
-                }
+        const couvercleUrl = pendingItem.localPhotos?.couvercle
+            ? URL.createObjectURL(pendingItem.localPhotos.couvercle)
+            : formData.photo_couvercle_url || null;
 
-                const adressesToInsert = [];
-                for (let i = 1; i < lines.length; i++) {
-                    const row = lines[i].split(';');
-                    if (row.length > Math.max(latIdx, longIdx)) {
-                        const lat = parseFloat(row[latIdx]);
-                        const lon = parseFloat(row[longIdx]);
-                        const numero = numeroIdx !== -1 ? row[numeroIdx]?.trim() : '';
-                        const street = voieNomIdx !== -1 ? row[voieNomIdx]?.trim() : '';
-                        const city = communeNomIdx !== -1 ? row[communeNomIdx]?.trim() : '';
+        const interieurUrl = pendingItem.localPhotos?.interieur
+            ? URL.createObjectURL(pendingItem.localPhotos.interieur)
+            : formData.photo_interieur_url || null;
 
-                        if (!isNaN(lat) && !isNaN(lon)) {
-                            adressesToInsert.push({
-                                city: city,
-                                house_number: numero,
-                                street: street,
-                                geometry: {
-                                    type: "Point",
-                                    coordinates: [lon, lat]
-                                }
-                            });
-                        }
+        setExportPhotoPreviews({
+            situation: situationUrl,
+            couvercle: couvercleUrl,
+            interieur: interieurUrl
+        });
+
+        // Enrichissement automatique en ligne
+        enrichPendingItem(pendingItem);
+    };
+
+    const enrichPendingItem = async (pendingItem: any) => {
+        const data = pendingItem.data;
+        const lat = data.latitude;
+        const lon = data.longitude;
+
+        setEnriching(true);
+        setSuggestions({});
+
+        let suggestedCommune = '';
+        let suggestedNumero = '';
+        let suggestedVoie = '';
+        let codeInsee = '';
+        let suggestedSection = '';
+        let suggestedParcelle = '';
+        let suggestedIdOuvrage = '';
+
+        if (lat && lon && isOnline) {
+            try {
+                // 1. API Adresse (BAN)
+                const resAdresse = await fetch(`https://api-adresse.data.gouv.fr/reverse/?lat=${lat}&lon=${lon}`);
+                if (resAdresse.ok) {
+                    const dataAdresse = await resAdresse.json();
+                    if (dataAdresse.features && dataAdresse.features.length > 0) {
+                        const props = dataAdresse.features[0].properties;
+                        suggestedCommune = props.city || '';
+                        suggestedNumero = props.housenumber || '';
+                        suggestedVoie = props.street || '';
+                        codeInsee = props.citycode || '';
                     }
                 }
 
-                await (offlineDb as any).adresses.clear();
-                await (offlineDb as any).adresses.bulkAdd(adressesToInsert);
-                alert(`✅ ${adressesToInsert.length} adresses stockées hors-ligne !`);
+                // 2. API Cadastre (APICarto IGN)
+                const geometry = JSON.stringify({ type: "Point", coordinates: [lon, lat] });
+                const resCadastre = await fetch(`https://apicarto.ign.fr/api/cadastre/parcelle?geom=${encodeURIComponent(geometry)}&_limit=1`);
+                if (resCadastre.ok) {
+                    const dataCadastre = await resCadastre.json();
+                    if (dataCadastre.features && dataCadastre.features.length > 0) {
+                        const props = dataCadastre.features[0].properties;
+                        suggestedSection = props.section || '';
+                        suggestedParcelle = props.numero || '';
+                    }
+                }
+
+                // 3. Calcul de l'ID Ouvrage unique sur Supabase
+                if (codeInsee && suggestedSection && suggestedParcelle) {
+                    const basePrefix = `${codeInsee}-${suggestedSection}${suggestedParcelle}-BR`;
+                    const { count, error } = await supabase
+                        .from('recolements_boites')
+                        .select('*', { count: 'exact', head: true })
+                        .ilike('id_ouvrage', `${basePrefix}%`);
+
+                    if (!error && count !== null && count > 0) {
+                        suggestedIdOuvrage = `${basePrefix}-${String(count + 1).padStart(2, '0')}`;
+                    } else {
+                        suggestedIdOuvrage = basePrefix;
+                    }
+                }
+            } catch (err) {
+                console.error("Erreur d'enrichissement en ligne :", err);
             }
-        } catch (error) {
-            console.error("Erreur lors de l'import :", error);
-            alert("Erreur lors de la lecture du fichier.");
+        }
+
+        setSuggestions({
+            commune: suggestedCommune,
+            voie_numero: suggestedNumero,
+            voie_nom: suggestedVoie,
+            section_cadastrale: suggestedSection,
+            parcelle_cadastrale: suggestedParcelle,
+            id_ouvrage: suggestedIdOuvrage
+        });
+
+        // Compléter par défaut si les champs de la fiche terrain étaient vides
+        setExportForm(prev => {
+            if (!prev) return prev;
+            return {
+                ...prev,
+                commune: prev.commune || suggestedCommune,
+                voie_numero: prev.voie_numero || suggestedNumero,
+                voie_nom: prev.voie_nom || suggestedVoie,
+                section_cadastrale: prev.section_cadastrale || suggestedSection,
+                parcelle_cadastrale: prev.parcelle_cadastrale || suggestedParcelle,
+                id_ouvrage: prev.id_ouvrage || suggestedIdOuvrage
+            };
+        });
+
+        setEnriching(false);
+    };
+
+    const handleValidateAndExport = async () => {
+        if (!exportForm) return;
+        setIsExporting(true);
+
+        const currentPendingItem = pendingItems[currentExportIndex];
+
+        try {
+            const finalData = { ...exportForm };
+
+            // Upload des photos vers Cloudinary si présentes localement
+            if (currentPendingItem.localPhotos?.situation) {
+                const url = await uploadToCloudinary(currentPendingItem.localPhotos.situation);
+                if (url) finalData.photo_situation_url = url;
+            }
+            if (currentPendingItem.localPhotos?.couvercle) {
+                const url = await uploadToCloudinary(currentPendingItem.localPhotos.couvercle);
+                if (url) finalData.photo_couvercle_url = url;
+            }
+            if (currentPendingItem.localPhotos?.interieur) {
+                const url = await uploadToCloudinary(currentPendingItem.localPhotos.interieur);
+                if (url) finalData.photo_interieur_url = url;
+            }
+
+            // Nettoyage des champs système/temporaires avant envoi à Supabase
+            const payload = { ...finalData } as any;
+            delete payload.id;
+            delete payload.created_at;
+            delete payload.photo_situation;
+            delete payload.photo_couvercle;
+            delete payload.photo_interieur;
+
+            // Remplacement des chaînes vides par null
+            Object.keys(payload).forEach((key) => {
+                if (payload[key] === "") payload[key] = null;
+            });
+
+            // Envoi dans la table Supabase
+            const { error } = await supabase
+                .from('recolements_boites')
+                .insert([payload]);
+
+            if (error) throw error;
+
+            // Supprimer le brouillon local Dexie une fois l'export réussi
+            if (currentPendingItem.id) {
+                await offlineDb.pendingSync.delete(currentPendingItem.id);
+            }
+
+            // Mettre à jour la liste des fiches restantes
+            const remaining = pendingItems.filter((_, idx) => idx !== currentExportIndex);
+            setPendingItems(remaining);
+            refreshPendingCount();
+
+            if (remaining.length === 0) {
+                setIsExportModalOpen(false);
+                alert("🎉 Toutes les fiches hors-ligne ont été vérifiées et exportées avec succès !");
+            } else {
+                const nextIdx = currentExportIndex >= remaining.length ? remaining.length - 1 : currentExportIndex;
+                setCurrentExportIndex(nextIdx);
+                loadExportItemAtIndex(nextIdx, remaining);
+            }
+
+        } catch (err: any) {
+            alert(`❌ Erreur lors de l'exportation : ${err.message || 'Erreur inconnue'}`);
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
+    const handleDeleteLocalDraft = async () => {
+        const currentPendingItem = pendingItems[currentExportIndex];
+        if (!currentPendingItem?.id) return;
+
+        if (window.confirm("Voulez-vous vraiment supprimer définitivement cette fiche saisie hors-ligne ?")) {
+            await offlineDb.pendingSync.delete(currentPendingItem.id);
+            const remaining = pendingItems.filter((_, idx) => idx !== currentExportIndex);
+            setPendingItems(remaining);
+            refreshPendingCount();
+
+            if (remaining.length === 0) {
+                setIsExportModalOpen(false);
+            } else {
+                const nextIdx = currentExportIndex >= remaining.length ? remaining.length - 1 : currentExportIndex;
+                setCurrentExportIndex(nextIdx);
+                loadExportItemAtIndex(nextIdx, remaining);
+            }
         }
     };
 
@@ -438,17 +617,15 @@ export default function SaisieRecolement() {
         recognition.start();
     };
 
-    // --- RECHERCHE ADRESSE / CADASTRE ADAPTÉE HORS-LIGNE (TURF.JS) ---
+    // RECHERCHE ADRESSE / CADASTRE ADAPTÉE HORS-LIGNE (TURF.JS)
     const fetchAddressAndCadastre = async (lat: number, lon: number) => {
         try {
             setActiveCoords({ lat, lon });
 
-            // 1. COMPORTEMENT HORS-LIGNE (TURF.JS)
             if (!isOnline) {
                 console.log("Mode hors-ligne détecté : recherche spatiale locale via Turf...");
                 const pt = turf.point([lon, lat]);
 
-                // 1. Recherche de la parcelle (déjà présent dans votre code)
                 if ((offlineDb as any).parcelles) {
                     const parcelles = await (offlineDb as any).parcelles.toArray();
                     const foundParcelle = parcelles.find((p: any) => p.geom && turf.booleanPointInPolygon(pt, p.geom));
@@ -459,7 +636,6 @@ export default function SaisieRecolement() {
                     }
                 }
 
-                // 2. Recherche de l'adresse la plus proche (À AJOUTER)
                 if ((offlineDb as any).adresses) {
                     const adresses = await (offlineDb as any).adresses.toArray();
                     let nearestAddress: any = null;
@@ -476,7 +652,7 @@ export default function SaisieRecolement() {
                         }
                     });
 
-                    if (nearestAddress && minDistance < 50) { // Seuil de tolérance de 50 mètres
+                    if (nearestAddress && minDistance < 50) {
                         setValue('commune', (nearestAddress.city || '') as any);
                         setValue('voie_numero', (nearestAddress.house_number || '') as any);
                         setValue('voie_nom', (nearestAddress.street || '') as any);
@@ -485,7 +661,6 @@ export default function SaisieRecolement() {
                 return;
             }
 
-            // 2. COMPORTEMENT EN LIGNE CLASSIQUE
             let codeInsee = '', sectionVal = '', parcelleVal = '';
 
             const resAdresse = await fetch(`https://api-adresse.data.gouv.fr/reverse/?lat=${lat}&lon=${lon}`);
@@ -647,6 +822,7 @@ export default function SaisieRecolement() {
                     createdAt: new Date().toISOString(),
                 });
                 alert('📦 Relevé et photos sauvegardés localement sur la tablette !');
+                refreshPendingCount();
                 resetSaisie();
             } catch (err: any) {
                 alert(`Erreur de stockage local : ${err.message}`);
@@ -656,23 +832,29 @@ export default function SaisieRecolement() {
 
     return (
         <div className="max-w-2xl mx-auto p-4 pb-24 bg-gray-50 min-h-screen">
-            <div className={`p-2 mb-4 text-center font-bold text-white rounded-md ${isOnline ? 'bg-green-600' : 'bg-red-600'}`}>
-                {isOnline ? '🟢 En Ligne (Cloud)' : '🔴 Hors Ligne (Sauvegarde Locale)'}
-            </div>
 
-{/* --- SECTION D'IMPORTATION DES DONNÉES LOCALES (HORS-LIGNE) --- */}
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-4">
-                <h3 className="text-sm font-bold text-gray-700 mb-2">📥 Chargement des données hors-ligne (Commune)</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                    <label className="flex flex-col p-2 border border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 text-center">
-                        <span className="font-medium text-blue-600">📂 Importer Parcelles (.geojson)</span>
-                        <input type="file" accept=".geojson,.json" onChange={(e) => handleImportFile(e, 'parcelles')} className="hidden" />
-                    </label>
-                    <label className="flex flex-col p-2 border border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 text-center">
-                        <span className="font-medium text-blue-600">📂 Importer Adresses (.csv BAL)</span>
-                        <input type="file" accept=".csv" onChange={(e) => handleImportFile(e, 'adresses')} className="hidden" />
-                    </label>
+            {/* BARRE D'ÉTAT + BOUTON EXPORT IN-LINE */}
+            <div className={`p-3 mb-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-2 shadow-sm ${isOnline ? 'bg-green-700 text-white' : 'bg-red-700 text-white'}`}>
+                <div className="flex items-center gap-2 font-bold text-sm">
+                    <span>{isOnline ? '🟢 Connecté (Cloud)' : '🔴 Mode Hors Ligne'}</span>
+                    {pendingCount > 0 && (
+                        <span className="bg-white/20 text-white text-xs px-2.5 py-0.5 rounded-full font-mono">
+                            {pendingCount} fiche(s) locale(s)
+                        </span>
+                    )}
                 </div>
+
+                <button
+                    type="button"
+                    onClick={handleOpenExportModal}
+                    disabled={!isOnline || pendingCount === 0}
+                    className={`w-full sm:w-auto px-4 py-2 rounded-lg text-xs font-bold shadow flex items-center justify-center gap-2 transition-all ${isOnline && pendingCount > 0
+                        ? 'bg-amber-400 text-amber-950 hover:bg-amber-300 animate-pulse cursor-pointer'
+                        : 'bg-gray-200 text-gray-500 cursor-not-allowed opacity-60'
+                        }`}
+                >
+                    🚀 Export In-Line {pendingCount > 0 ? `(${pendingCount})` : ''}
+                </button>
             </div>
 
             <h1 className="text-2xl font-bold mb-4 text-gray-800">Fiche de Récolement</h1>
@@ -743,7 +925,11 @@ export default function SaisieRecolement() {
                 <form
                     onSubmit={handleSubmit(onSubmit, (formErrors) => {
                         console.error("❌ Erreurs de validation :", formErrors);
-                        alert("Formulaire incomplet : vérifiez les champs obligatoires (ID Ouvrage, Technicien, Commune, Date).");
+                        if (!isOnline) {
+                            alert("Formulaire incomplet : Le champ Technicien et la Date sont obligatoires même hors-ligne.");
+                        } else {
+                            alert("Formulaire incomplet : vérifiez les champs obligatoires (ID Ouvrage, Technicien, Commune, Date).");
+                        }
                     })}
                     className="space-y-8"
                 >
@@ -762,11 +948,13 @@ export default function SaisieRecolement() {
                         <h2 className="text-xl font-bold mb-4 text-blue-800 border-b pb-2">Informations Générales</h2>
                         <div className="space-y-4">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">ID Ouvrage *</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    ID Ouvrage {isOnline ? '*' : <span className="text-xs text-blue-600 font-normal italic">(Calculé à l'export)</span>}
+                                </label>
                                 <input
-                                    {...register("id_ouvrage", { required: "Ce champ est obligatoire" })}
+                                    {...register("id_ouvrage", { required: isOnline ? "Ce champ est obligatoire en ligne" : false })}
                                     className={`w-full p-3 border rounded-lg text-lg focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${getFieldBg('id_ouvrage')}`}
-                                    placeholder="Ex: 27638-AA0142-BR-01"
+                                    placeholder={isOnline ? "Ex: 27638-AA0142-BR-01" : "Sera déduit avec le GPS"}
                                 />
                                 {errors.id_ouvrage && <span className="text-red-500 text-sm mt-1">{errors.id_ouvrage.message}</span>}
                             </div>
@@ -830,7 +1018,6 @@ export default function SaisieRecolement() {
                                                 <MapRecenter center={[activeCoords.lat, activeCoords.lon]} />
                                                 <MapClickHandler onMapClick={(lat, lon) => fetchAddressAndCadastre(lat, lon)} />
 
-                                                {/* INJECTION DU GESTIONNAIRE HORS-LIGNE POUR OSM (Remplace l'ancienne tuile standard) */}
                                                 <OfflineMapManager />
 
                                                 <LayersControl position="topright">
@@ -851,8 +1038,14 @@ export default function SaisieRecolement() {
                             </div>
 
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Commune *</label>
-                                <input {...register("commune", { required: "Commune requise" })} className={`w-full p-3 border rounded-lg text-lg transition-colors ${getFieldBg('commune')}`} />
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Commune {isOnline ? '*' : <span className="text-xs text-blue-600 font-normal italic">(Auto via GPS)</span>}
+                                </label>
+                                <input
+                                    {...register("commune", { required: isOnline ? "Commune requise en ligne" : false })}
+                                    className={`w-full p-3 border rounded-lg text-lg transition-colors ${getFieldBg('commune')}`}
+                                    placeholder={!isOnline ? "Laissée vide = auto-complétion" : ""}
+                                />
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1106,6 +1299,7 @@ export default function SaisieRecolement() {
                 </form>
             )}
 
+            {/* MODAL DE DÉFINITION D'UN REPÈRE */}
             {isRepereModalOpen && (
                 <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
                     <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
@@ -1138,6 +1332,254 @@ export default function SaisieRecolement() {
                     </div>
                 </div>
             )}
+
+            {/* MODAL EXPORT IN-LINE (REVUE ET VALIDATION PAS-À-PAS) */}
+            {isExportModalOpen && exportForm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full flex flex-col max-h-[90vh] overflow-hidden border border-gray-200">
+
+                        {/* Header Modal */}
+                        <div className="px-6 py-4 bg-slate-800 text-white flex justify-between items-center">
+                            <div>
+                                <h2 className="text-lg font-bold flex items-center gap-2">
+                                    🚀 Contrôle Export In-Line
+                                </h2>
+                                <p className="text-xs text-slate-300">
+                                    Fiche {currentExportIndex + 1} sur {pendingItems.length} en attente
+                                </p>
+                            </div>
+                            <button onClick={() => setIsExportModalOpen(false)} className="text-slate-400 hover:text-white font-bold text-xl">✕</button>
+                        </div>
+
+                        {/* Corps Modal avec défilement */}
+                        <div className="p-6 overflow-y-auto space-y-6 flex-1 text-sm">
+
+                            {/* Alerte Enrichissement */}
+                            {enriching ? (
+                                <div className="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded-xl text-xs flex items-center gap-2 animate-pulse">
+                                    <span>🔄</span> Recherche automatique BAN / Cadastre & calcul d'ID Ouvrage...
+                                </div>
+                            ) : (
+                                <div className="bg-green-50 border border-green-200 text-green-800 p-3 rounded-xl text-xs flex items-center gap-2">
+                                    <span>✅</span> Données enrichies via les services en ligne. Vous pouvez ajuster chaque champ avant export.
+                                </div>
+                            )}
+
+                            {/* Section 1 : Ouvrage & Technicien */}
+                            <div className="space-y-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                                <h3 className="font-bold text-blue-800 border-b pb-1 text-base">Identifiants de la fiche</h3>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-700 mb-1">ID Ouvrage</label>
+                                    <input
+                                        type="text"
+                                        value={exportForm.id_ouvrage || ''}
+                                        onChange={(e) => setExportForm({ ...exportForm, id_ouvrage: e.target.value })}
+                                        className="w-full p-2.5 border rounded-lg font-mono font-bold bg-white"
+                                    />
+                                    {suggestions.id_ouvrage && exportForm.id_ouvrage !== suggestions.id_ouvrage && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setExportForm({ ...exportForm, id_ouvrage: suggestions.id_ouvrage })}
+                                            className="text-xs text-blue-600 underline mt-1 block font-medium"
+                                        >
+                                            💡 Appliquer l'ID calculé : {suggestions.id_ouvrage}
+                                        </button>
+                                    )}
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-700 mb-1">Technicien</label>
+                                        <input
+                                            type="text"
+                                            value={exportForm.technicien || ''}
+                                            onChange={(e) => setExportForm({ ...exportForm, technicien: e.target.value })}
+                                            className="w-full p-2.5 border rounded-lg bg-white"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-700 mb-1">Date récolement</label>
+                                        <input
+                                            type="date"
+                                            value={exportForm.date_recolement || ''}
+                                            onChange={(e) => setExportForm({ ...exportForm, date_recolement: e.target.value })}
+                                            className="w-full p-2.5 border rounded-lg bg-white"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Section 2 : Adresse & Cadastre */}
+                            <div className="space-y-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                                <h3 className="font-bold text-blue-800 border-b pb-1 text-base">Adresse & Cadastre enrichis</h3>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-700 mb-1">Commune</label>
+                                    <input
+                                        type="text"
+                                        value={exportForm.commune || ''}
+                                        onChange={(e) => setExportForm({ ...exportForm, commune: e.target.value })}
+                                        className="w-full p-2.5 border rounded-lg bg-white"
+                                    />
+                                    {suggestions.commune && exportForm.commune !== suggestions.commune && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setExportForm({ ...exportForm, commune: suggestions.commune })}
+                                            className="text-xs text-blue-600 underline mt-1 block"
+                                        >
+                                            💡 Suggestion BAN : {suggestions.commune}
+                                        </button>
+                                    )}
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-700 mb-1">N° voie</label>
+                                        <input
+                                            type="text"
+                                            value={exportForm.voie_numero || ''}
+                                            onChange={(e) => setExportForm({ ...exportForm, voie_numero: e.target.value })}
+                                            className="w-full p-2.5 border rounded-lg bg-white"
+                                        />
+                                    </div>
+                                    <div className="sm:col-span-2">
+                                        <label className="block text-xs font-semibold text-gray-700 mb-1">Nom voie</label>
+                                        <input
+                                            type="text"
+                                            value={exportForm.voie_nom || ''}
+                                            onChange={(e) => setExportForm({ ...exportForm, voie_nom: e.target.value })}
+                                            className="w-full p-2.5 border rounded-lg bg-white"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-700 mb-1">Section cadastrale</label>
+                                        <input
+                                            type="text"
+                                            value={exportForm.section_cadastrale || ''}
+                                            onChange={(e) => setExportForm({ ...exportForm, section_cadastrale: e.target.value })}
+                                            className="w-full p-2.5 border rounded-lg bg-white"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-700 mb-1">Parcelle cadastrale</label>
+                                        <input
+                                            type="text"
+                                            value={exportForm.parcelle_cadastrale || ''}
+                                            onChange={(e) => setExportForm({ ...exportForm, parcelle_cadastrale: e.target.value })}
+                                            className="w-full p-2.5 border rounded-lg bg-white"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Section 3 : Visualisation des photos */}
+                            <div className="space-y-3 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                                <h3 className="font-bold text-blue-800 border-b pb-1 text-base">Photos rattachées</h3>
+                                <div className="grid grid-cols-3 gap-3 text-center">
+                                    <div>
+                                        <span className="block text-xs font-semibold mb-1">Situation</span>
+                                        {exportPhotoPreviews.situation ? (
+                                            <img src={exportPhotoPreviews.situation} alt="Situation" className="w-full h-24 object-cover rounded-lg border" />
+                                        ) : (
+                                            <div className="w-full h-24 bg-gray-200 rounded-lg flex items-center justify-center text-xs text-gray-500">Sans photo</div>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <span className="block text-xs font-semibold mb-1">Couvercle</span>
+                                        {exportPhotoPreviews.couvercle ? (
+                                            <img src={exportPhotoPreviews.couvercle} alt="Couvercle" className="w-full h-24 object-cover rounded-lg border" />
+                                        ) : (
+                                            <div className="w-full h-24 bg-gray-200 rounded-lg flex items-center justify-center text-xs text-gray-500">Sans photo</div>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <span className="block text-xs font-semibold mb-1">Intérieur</span>
+                                        {exportPhotoPreviews.interieur ? (
+                                            <img src={exportPhotoPreviews.interieur} alt="Intérieur" className="w-full h-24 object-cover rounded-lg border" />
+                                        ) : (
+                                            <div className="w-full h-24 bg-gray-200 rounded-lg flex items-center justify-center text-xs text-gray-500">Sans photo</div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Section 4 : Observations */}
+                            <div className="space-y-3">
+                                <label className="block text-xs font-semibold text-gray-700">Observations Terrain</label>
+                                <textarea
+                                    rows={2}
+                                    value={exportForm.observations_localisation || ''}
+                                    onChange={(e) => setExportForm({ ...exportForm, observations_localisation: e.target.value })}
+                                    className="w-full p-2.5 border rounded-lg text-xs"
+                                />
+                            </div>
+
+                        </div>
+
+                        {/* Footer Modal Actions */}
+                        <div className="p-4 bg-gray-100 border-t border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-3">
+
+                            {/* Navigation */}
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const prevIdx = currentExportIndex - 1;
+                                        setCurrentExportIndex(prevIdx);
+                                        loadExportItemAtIndex(prevIdx, pendingItems);
+                                    }}
+                                    disabled={currentExportIndex === 0}
+                                    className="px-3 py-1.5 bg-white border rounded-lg text-xs font-bold disabled:opacity-40"
+                                >
+                                    ◀ Précédent
+                                </button>
+                                <span className="text-xs font-mono font-bold">
+                                    {currentExportIndex + 1} / {pendingItems.length}
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const nextIdx = currentExportIndex + 1;
+                                        setCurrentExportIndex(nextIdx);
+                                        loadExportItemAtIndex(nextIdx, pendingItems);
+                                    }}
+                                    disabled={currentExportIndex >= pendingItems.length - 1}
+                                    className="px-3 py-1.5 bg-white border rounded-lg text-xs font-bold disabled:opacity-40"
+                                >
+                                    Suivant ▶
+                                </button>
+                            </div>
+
+                            {/* Validation / Suppression */}
+                            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                                <button
+                                    type="button"
+                                    onClick={handleDeleteLocalDraft}
+                                    className="px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 border border-red-200 rounded-lg"
+                                >
+                                    🗑️ Supprimer
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={handleValidateAndExport}
+                                    disabled={isExporting}
+                                    className={`px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-lg shadow flex items-center gap-2 ${isExporting ? 'animate-pulse opacity-70' : ''}`}
+                                >
+                                    {isExporting ? '⏳ Exportation...' : '✅ Valider & Exporter'}
+                                </button>
+                            </div>
+
+                        </div>
+
+                    </div>
+                </div>
+            )}
+
         </div>
     );
 }
