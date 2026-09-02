@@ -358,7 +358,10 @@ export default function SaisieRecolement() {
             return {
                 ...prev,
                 commune: prev.commune || suggestedCommune,
-                voie_numero: prev.voie_numero || suggestedNumero,
+
+                // ⚠️ On garde STRICTEMENT la saisie terrain, on n'écrase jamais avec l'API
+                voie_numero: prev.voie_numero,
+
                 voie_nom: prev.voie_nom || suggestedVoie,
                 section_cadastrale: prev.section_cadastrale || suggestedSection,
                 parcelle_cadastrale: prev.parcelle_cadastrale || suggestedParcelle,
@@ -1049,7 +1052,17 @@ export default function SaisieRecolement() {
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div><label className="block text-sm font-medium text-gray-700 mb-1">N° voie</label><input {...register("voie_numero")} className={`w-full p-3 border rounded-lg text-lg transition-colors ${getFieldBg('voie_numero')}`} /></div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        N° voie {!isOnline && '*'}
+                                    </label>
+                                    <input
+                                        {...register("voie_numero", { required: !isOnline ? "Obligatoire hors-ligne" : false })}
+                                        className={`w-full p-3 border rounded-lg text-lg transition-colors ${getFieldBg('voie_numero')}`}
+                                        placeholder={!isOnline ? "Ex: 12 bis" : ""}
+                                    />
+                                    {errors.voie_numero && <span className="text-red-500 text-xs mt-1">{errors.voie_numero.message}</span>}
+                                </div>
                                 <div className="md:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Nom voie</label><input {...register("voie_nom")} className={`w-full p-3 border rounded-lg text-lg transition-colors ${getFieldBg('voie_nom')}`} /></div>
                             </div>
 
@@ -1409,6 +1422,40 @@ export default function SaisieRecolement() {
                                     </div>
                                 </div>
                             </div>
+
+
+                            {/* NOUVELLE SECTION : Carte Satellite dans la revue */}
+                            {exportForm.latitude && exportForm.longitude && (
+                                <div className="space-y-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                                    <div className="flex justify-between items-center border-b pb-1">
+                                        <h3 className="font-bold text-blue-800 text-base">Localisation Terrain (Vue Satellite)</h3>
+                                        <span className="text-xs text-gray-500 font-mono">
+                                            Lat: {exportForm.latitude.toFixed(6)} | Lng: {exportForm.longitude.toFixed(6)}
+                                        </span>
+                                    </div>
+
+                                    <div className="h-64 w-full rounded-lg overflow-hidden border border-gray-300 shadow-sm relative z-0">
+                                        <MapContainer
+                                            center={[exportForm.latitude, exportForm.longitude]}
+                                            zoom={19}
+                                            style={{ height: '100%', width: '100%' }}
+                                        >
+                                            {/* Permet de recentrer automatiquement la carte à l'ouverture du Modal */}
+                                            <MapRecenter center={[exportForm.latitude, exportForm.longitude]} />
+
+                                            {/* Couche Satellite IGN */}
+                                            <TileLayer
+                                                url="https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}"
+                                                maxZoom={19}
+                                            />
+
+                                            <Marker position={[exportForm.latitude, exportForm.longitude]}>
+                                                <Popup>Emplacement capturé hors-ligne</Popup>
+                                            </Marker>
+                                        </MapContainer>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Section 2 : Adresse & Cadastre */}
                             <div className="space-y-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
