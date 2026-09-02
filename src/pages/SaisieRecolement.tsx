@@ -8,12 +8,15 @@ import { offlineDb } from '../db/offlineDb';
 import { useSyncQueue } from '../hooks/useSyncQueue';
 import imageCompression from 'browser-image-compression';
 
-// Imports pour la carte interactive Leaflet (avec LayersControl)
+// --- NOUVEAUX IMPORTS HORS-LIGNE ---
+import * as turf from '@turf/turf';
+import 'leaflet.offline';
+
+// Imports pour la carte interactive Leaflet
 import { MapContainer, TileLayer, Marker, Popup, WMSTileLayer, LayersControl, useMapEvents, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
-// Correction standard pour l'affichage des icônes de marqueur Leaflet avec Vite/Webpack
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 
@@ -25,7 +28,7 @@ const DefaultIcon = L.icon({
 });
 L.Marker.prototype.options.icon = DefaultIcon;
 
-// Composant interne pour recentrer la carte dynamiquement quand le GPS change
+// Composant de recentrage
 function MapRecenter({ center }: { center: [number, number] }) {
     const map = useMap();
     useEffect(() => {
@@ -34,7 +37,7 @@ function MapRecenter({ center }: { center: [number, number] }) {
     return null;
 }
 
-// Composant interne pour gérer les clics interactifs sur la carte
+// Gestion des clics
 function MapClickHandler({ onMapClick }: { onMapClick: (lat: number, lon: number) => void }) {
     useMapEvents({
         click(e) {
@@ -44,7 +47,63 @@ function MapClickHandler({ onMapClick }: { onMapClick: (lat: number, lon: number
     return null;
 }
 
-// Fonction utilitaire pour l'upload vers Cloudinary
+// Indicateur de zoom en temps réel
+function ZoomIndicator() {
+    const [zoom, setZoom] = useState(18);
+    const map = useMapEvents({
+        zoom() {
+            setZoom(map.getZoom());
+        },
+    });
+
+    return (
+        <div className="absolute bottom-2 left-2 bg-black/70 text-white px-2 py-1 rounded text-xs font-mono z-[1000] pointer-events-none">
+            Zoom : {zoom}
+        </div>
+    );
+}
+
+// --- NOUVEAU COMPOSANT : GESTIONNAIRE DE CARTE HORS-LIGNE ---
+function OfflineMapManager() {
+    const map = useMap();
+
+    useEffect(() => {
+        // 1. Initialisation de la couche hors-ligne
+        // @ts-ignore : On ignore l'erreur TS car leaflet.offline modifie le prototype L globalement
+        const offlineLayer = L.tileLayer.offline('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap (Cache Offline)'
+        });
+
+        offlineLayer.addTo(map);
+
+        // 2. Ajout du bouton de téléchargement sur la carte
+        // @ts-ignore
+        const saveControl = L.control.savetiles(offlineLayer, {
+            zoomlevels: [16, 17, 18, 19], // On stocke uniquement les zooms très précis pour le terrain
+            confirm(info: any, savetiles: any) {
+                if (window.confirm(`Télécharger ${info._tilesforSave.length} tuiles cartographiques pour le mode hors-ligne ?`)) {
+                    savetiles();
+                }
+            },
+            confirmSave() {
+                alert('✅ Zone cartographique téléchargée et disponible sans réseau !');
+            },
+            saveText: '💾 Cacher la zone',
+            rmText: '🗑️ Vider le cache',
+        });
+
+        saveControl.addTo(map);
+
+        return () => {
+            map.removeControl(saveControl);
+            map.removeLayer(offlineLayer);
+        };
+    }, [map]);
+
+    return null;
+}
+
 const uploadToCloudinary = async (file: File): Promise<string | null> => {
     const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
     const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
@@ -76,13 +135,11 @@ export default function SaisieRecolement() {
     const { location, requestLocation } = useGeolocation();
     useSyncQueue();
 
-    // --- NOUVEAUX ÉTATS POUR LA GESTION DES ONGLETS ET DE LA MODIFICATION ---
     const [activeTab, setActiveTab] = useState<'saisie' | 'historique'>('saisie');
     const [historique, setHistorique] = useState<any[]>([]);
     const [isLoadingHist, setIsLoadingHist] = useState(false);
     const [editId, setEditId] = useState<string | number | null>(null);
 
-    // États de la modale des repères
     const [isRepereModalOpen, setIsRepereModalOpen] = useState(false);
     const [reperesList, setReperesList] = useState<any[]>([]);
     const [currentRepere, setCurrentRepere] = useState({
@@ -92,14 +149,10 @@ export default function SaisieRecolement() {
         observations: ''
     });
 
-    // Position active sur la carte
     const [activeCoords, setActiveCoords] = useState<{ lat: number; lon: number } | null>(null);
-
-    // État pour la dictée vocale
     const [listeningField, setListeningField] = useState<string | null>(null);
     const recognitionRef = useRef<any>(null);
 
-    // États séparés pour les fichiers bruts et leurs aperçus
     const [photoFiles, setPhotoFiles] = useState<{
         photo_situation: File | null;
         photo_couvercle: File | null;
@@ -112,10 +165,8 @@ export default function SaisieRecolement() {
         photo_interieur: string | null;
     }>({ photo_situation: null, photo_couvercle: null, photo_interieur: null });
 
-    // État de chargement global
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // Configuration de react-hook-form (Ajout de 'reset' pour la modification)
     const { register, handleSubmit, formState: { errors }, watch, setValue, getValues, reset } = useForm<RecoletBoite>({
         defaultValues: {
             technicien: '',
@@ -130,7 +181,6 @@ export default function SaisieRecolement() {
     const lastFetchedCoords = useRef<{ lat: number; lon: number } | null>(null);
     const formValues = watch();
 
-    // --- CHARGEMENT DE L'HISTORIQUE ---
     useEffect(() => {
         if (activeTab === 'historique' && isOnline) {
             fetchHistorique();
@@ -143,7 +193,7 @@ export default function SaisieRecolement() {
             .from('recolements_boites')
             .select('*')
             .order('created_at', { ascending: false })
-            .limit(50); // Limite pour les perfs
+            .limit(50);
 
         if (!error && data) {
             setHistorique(data);
@@ -151,39 +201,27 @@ export default function SaisieRecolement() {
         setIsLoadingHist(false);
     };
 
-    // --- FONCTION DE PASSAGE EN MODE MODIFICATION ---
     const handleEditRecord = (record: any) => {
-        // Définir l'ID pour l'update (privilégier id, sinon id_ouvrage)
         setEditId(record.id || record.id_ouvrage);
-
-        // Remplir le formulaire
         reset(record);
         setReperesList(record.reperes || []);
-
-        // Restaurer les coordonnées
         if (record.latitude && record.longitude) {
             setActiveCoords({ lat: record.latitude, lon: record.longitude });
         } else {
             setActiveCoords(null);
         }
-
-        // Restaurer les aperçus photos depuis les URLs existantes
         setPhotoPreviews({
             photo_situation: record.photo_situation_url || null,
             photo_couvercle: record.photo_couvercle_url || null,
             photo_interieur: record.photo_interieur_url || null,
         });
-
-        // Réinitialiser les fichiers en attente (puisqu'ils sont déjà sur le cloud)
         setPhotoFiles({ photo_situation: null, photo_couvercle: null, photo_interieur: null });
-
         setActiveTab('saisie');
     };
 
-    // --- FONCTION D'ANNULATION / RÉINITIALISATION ---
     const resetSaisie = () => {
         setEditId(null);
-        const currentTech = getValues('technicien'); // Conserver le nom du technicien
+        const currentTech = getValues('technicien');
         reset({
             technicien: currentTech,
             date_recolement: new Date().toISOString().split('T')[0],
@@ -196,7 +234,6 @@ export default function SaisieRecolement() {
         setPhotoFiles({ photo_situation: null, photo_couvercle: null, photo_interieur: null });
     };
 
-    // Gestion de l'insertion automatique du symbole
     useEffect(() => {
         const currentDim = getValues('dimensions') || '';
         if (formeSelectionnee === 'Circulaire') {
@@ -220,7 +257,6 @@ export default function SaisieRecolement() {
         return isEmpty ? "bg-amber-50/80 border-amber-200" : "bg-white border-gray-300";
     };
 
-    // --- GESTION LOCALE DES PHOTOS ---
     const handlePhotoCapture = async (
         photoType: 'photo_situation' | 'photo_couvercle' | 'photo_interieur',
         e: React.ChangeEvent<HTMLInputElement>
@@ -229,9 +265,9 @@ export default function SaisieRecolement() {
         if (!file) return;
 
         const options = {
-            maxSizeMB: 0.8,          // Limite le poids à ~800 Ko
-            maxWidthOrHeight: 1920,  // Redimensionne en Full HD max
-            useWebWorker: true       // Traitement fluide en arrière-plan
+            maxSizeMB: 0.8,
+            maxWidthOrHeight: 1920,
+            useWebWorker: true
         };
 
         try {
@@ -247,10 +283,9 @@ export default function SaisieRecolement() {
 
     const handleRemovePhoto = (photoType: 'photo_situation' | 'photo_couvercle' | 'photo_interieur') => {
         setPhotoFiles(prev => ({ ...prev, [photoType]: null }));
-        setPhotoPreviews(prev => ({ ...prev, [photoType]: null })); // Servira d'indicateur pour supprimer l'URL en BDD
+        setPhotoPreviews(prev => ({ ...prev, [photoType]: null }));
     };
 
-    // --- GESTION DES REPÈRES (TRIANGULATION) ---
     const getNextRepereName = (list: any[]) => {
         let n = 1;
         while (list.some(r => r.point === `REP ${n}`)) n++;
@@ -284,7 +319,6 @@ export default function SaisieRecolement() {
         setValue('reperes', updatedList);
     };
 
-    // --- DICTÉE VOCALE ---
     const toggleDictation = (field: string, isModal: boolean = false) => {
         const trackingKey = isModal ? `modal_${field}` : field;
         if (listeningField === trackingKey && recognitionRef.current) {
@@ -326,10 +360,31 @@ export default function SaisieRecolement() {
         recognition.start();
     };
 
-    // --- RECHERCHE ADRESSE / CADASTRE ---
+    // --- RECHERCHE ADRESSE / CADASTRE ADAPTÉE HORS-LIGNE (TURF.JS) ---
     const fetchAddressAndCadastre = async (lat: number, lon: number) => {
         try {
             setActiveCoords({ lat, lon });
+
+            // 1. COMPORTEMENT HORS-LIGNE (TURF.JS)
+            if (!isOnline) {
+                console.log("Mode hors-ligne détecté : recherche spatiale locale via Turf...");
+
+                if ((offlineDb as any).parcelles) {
+                    const parcelles = await (offlineDb as any).parcelles.toArray();
+                    const pt = turf.point([lon, lat]);
+
+                    const found = parcelles.find((p: any) => p.geom && turf.booleanPointInPolygon(pt, p.geom));
+
+                    if (found) {
+                        setValue('section_cadastrale', found.section || '');
+                        setValue('parcelle_cadastrale', found.numero || '');
+                        console.log("✅ Parcelle trouvée localement :", found.section, found.numero);
+                    }
+                }
+                return;
+            }
+
+            // 2. COMPORTEMENT EN LIGNE CLASSIQUE
             let codeInsee = '', sectionVal = '', parcelleVal = '';
 
             const resAdresse = await fetch(`https://api-adresse.data.gouv.fr/reverse/?lat=${lat}&lon=${lon}`);
@@ -355,7 +410,6 @@ export default function SaisieRecolement() {
                 setValue('parcelle_cadastrale', parcelleVal);
             }
 
-            // Génération ID Ouvrage uniquement si ce n'est pas une modification (pour ne pas écraser l'ID existant)
             if (!editId && codeInsee && sectionVal && parcelleVal) {
                 const basePrefix = `${codeInsee}-${sectionVal}${parcelleVal}-BR`;
                 const { count, error } = await supabase
@@ -370,12 +424,11 @@ export default function SaisieRecolement() {
                 setValue('id_ouvrage', finalIdOuvrage);
             }
         } catch (error) {
-            console.error("❌ Erreur API :", error);
+            console.error("❌ Erreur de récupération adresse/cadastre :", error);
         }
     };
 
     useEffect(() => {
-        // En mode édition, on ne veut pas écraser l'adresse dès que le composant monte si la localisation est active
         if (!editId && location.latitude != null && location.longitude != null) {
             if (!lastFetchedCoords.current || lastFetchedCoords.current.lat !== location.latitude || lastFetchedCoords.current.lon !== location.longitude) {
                 lastFetchedCoords.current = { lat: location.latitude, lon: location.longitude };
@@ -384,7 +437,6 @@ export default function SaisieRecolement() {
         }
     }, [location.latitude, location.longitude, editId]);
 
-    // --- SOUMISSION GLOBALE (INSERT ou UPDATE) ---
     const onSubmit = async (data: RecoletBoite) => {
         setIsSubmitting(true);
 
@@ -392,21 +444,17 @@ export default function SaisieRecolement() {
             if ((data as any)[key] === "") (data as any)[key] = null;
         });
 
-        // Gestion conditionnelle des images :
-        // On n'écrase pas les URLs existantes (data.photo_xxx_url) sauf si l'utilisateur a uploadé un nouveau fichier, ou s'il a cliqué sur la croix (preview == null).
         if (isOnline) {
             try {
-                // Situation
                 if (photoFiles.photo_situation) {
                     const url = await uploadToCloudinary(photoFiles.photo_situation);
                     data.photo_situation_url = url as any;
-                    data.photo_situation = url as any; // Conservation double-colonne
+                    data.photo_situation = url as any;
                 } else if (!photoPreviews.photo_situation) {
                     data.photo_situation_url = null as any;
                     data.photo_situation = null as any;
                 }
 
-                // Couvercle
                 if (photoFiles.photo_couvercle) {
                     const url = await uploadToCloudinary(photoFiles.photo_couvercle);
                     data.photo_couvercle_url = url as any;
@@ -416,7 +464,6 @@ export default function SaisieRecolement() {
                     data.photo_couvercle = null as any;
                 }
 
-                // Intérieur
                 if (photoFiles.photo_interieur) {
                     const url = await uploadToCloudinary(photoFiles.photo_interieur);
                     data.photo_interieur_url = url as any;
@@ -435,14 +482,11 @@ export default function SaisieRecolement() {
         if (activeCoords) {
             data.latitude = activeCoords.lat;
             data.longitude = activeCoords.lon;
-            // On conserve la précision initiale si on ne fait que modifier sans capturer de nouveau le GPS
             if (location.accuracy) data.precision_gps = location.accuracy;
         }
 
         if (isOnline) {
             let error;
-
-            // Nettoyage strict : suppression des variables temporaires du formulaire et des champs auto
             const payload = { ...data } as any;
             delete payload.id;
             delete payload.created_at;
@@ -451,8 +495,6 @@ export default function SaisieRecolement() {
             delete payload.photo_interieur;
 
             if (editId) {
-                // MISE À JOUR (UPDATE)
-                // CORRECTION : Tolère les entiers convertis en texte (ex: "45")
                 const isTechnicalId = typeof editId === 'number' ||
                     (typeof editId === 'string' && /^\d+$/.test(editId)) ||
                     (typeof editId === 'string' && /^[0-9a-fA-F-]{36}$/.test(editId));
@@ -463,18 +505,16 @@ export default function SaisieRecolement() {
                     .from('recolements_boites')
                     .update(payload)
                     .eq(searchColumn, editId)
-                    .select(); // 👈 OBLIGATOIRE pour détecter les échecs silencieux
+                    .select();
 
                 error = res.error;
 
-                // 🚨 Détection de l'échec silencieux
                 if (!error && (!res.data || res.data.length === 0)) {
-                    alert(`⚠️ Échec de la modification : l'ouvrage n'a pas été trouvé ou une règle de sécurité Supabase (RLS) bloque l'Update.`);
+                    alert(`⚠️ Échec de la modification : l'ouvrage n'a pas été trouvé.`);
                     setIsSubmitting(false);
                     return;
                 }
             } else {
-                // INSERTION
                 const res = await supabase
                     .from('recolements_boites')
                     .insert([payload]);
@@ -484,7 +524,6 @@ export default function SaisieRecolement() {
             setIsSubmitting(false);
 
             if (error) {
-                console.error('❌ ERREUR SUPABASE :', error);
                 alert(`Erreur Supabase (${error.code}) : ${error.message}`);
             } else {
                 alert(`✅ Relevé ${editId ? 'modifié' : 'enregistré'} avec succès !`);
@@ -516,14 +555,12 @@ export default function SaisieRecolement() {
 
     return (
         <div className="max-w-2xl mx-auto p-4 pb-24 bg-gray-50 min-h-screen">
-            {/* Barre d'état réseau */}
             <div className={`p-2 mb-4 text-center font-bold text-white rounded-md ${isOnline ? 'bg-green-600' : 'bg-red-600'}`}>
                 {isOnline ? '🟢 En Ligne (Cloud)' : '🔴 Hors Ligne (Sauvegarde Locale)'}
             </div>
 
             <h1 className="text-2xl font-bold mb-4 text-gray-800">Fiche de Récolement</h1>
 
-            {/* --- NAVIGATION ONGLETS --- */}
             <div className="flex bg-white rounded-xl shadow-sm border border-gray-200 p-1 mb-6">
                 <button
                     type="button"
@@ -541,7 +578,6 @@ export default function SaisieRecolement() {
                 </button>
             </div>
 
-            {/* --- CONTENU ONGLET: HISTORIQUE --- */}
             {activeTab === 'historique' && (
                 <div className="space-y-4">
                     {!isOnline ? (
@@ -556,7 +592,6 @@ export default function SaisieRecolement() {
                         historique.map((rec) => (
                             <div key={rec.id || rec.id_ouvrage} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
                                 <div className="flex gap-4 items-center">
-                                    {/* Miniature photo */}
                                     {rec.photo_situation_url ? (
                                         <img src={rec.photo_situation_url} alt="Situation" className="w-16 h-16 object-cover rounded-lg border border-gray-200 shadow-sm shrink-0" />
                                     ) : (
@@ -564,7 +599,6 @@ export default function SaisieRecolement() {
                                             📷
                                         </div>
                                     )}
-                                    {/* Informations */}
                                     <div>
                                         <h3 className="font-bold text-gray-800">{rec.id_ouvrage}</h3>
                                         <p className="text-sm text-gray-600 font-medium">
@@ -589,7 +623,6 @@ export default function SaisieRecolement() {
                 </div>
             )}
 
-            {/* --- CONTENU ONGLET: SAISIE (Formulaire) --- */}
             {activeTab === 'saisie' && (
                 <form
                     onSubmit={handleSubmit(onSubmit, (formErrors) => {
@@ -598,8 +631,6 @@ export default function SaisieRecolement() {
                     })}
                     className="space-y-8"
                 >
-
-                    {/* Bannière de mode modification */}
                     {editId && (
                         <div className="bg-amber-100 border border-amber-300 text-amber-800 p-3 rounded-xl flex justify-between items-center shadow-sm">
                             <div className="font-medium">
@@ -611,7 +642,6 @@ export default function SaisieRecolement() {
                         </div>
                     )}
 
-                    {/* --- SECTION 0 : IDENTIFIANTS --- */}
                     <section className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
                         <h2 className="text-xl font-bold mb-4 text-blue-800 border-b pb-2">Informations Générales</h2>
                         <div className="space-y-4">
@@ -656,7 +686,6 @@ export default function SaisieRecolement() {
                         </div>
                     </section>
 
-                    {/* --- SECTION 1 : LOCALISATION & CADASTRE --- */}
                     <section className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
                         <h2 className="text-xl font-bold mb-4 text-blue-800 border-b pb-2">1. Localisation & Cadastre</h2>
                         <div className="space-y-4">
@@ -679,12 +708,16 @@ export default function SaisieRecolement() {
                                         <div className="text-sm text-green-700 font-mono bg-green-50 p-2 rounded border border-green-200">
                                             Lat: {activeCoords.lat.toFixed(6)} | Lng: {activeCoords.lon.toFixed(6)}
                                         </div>
-                                        <div className="h-72 w-full rounded-lg overflow-hidden border border-gray-300 shadow-inner z-0">
+                                        <div className="h-72 w-full rounded-lg overflow-hidden border z-0 relative">
                                             <MapContainer center={[activeCoords.lat, activeCoords.lon]} zoom={18} style={{ height: '100%', width: '100%' }}>
+                                                <ZoomIndicator />
                                                 <MapRecenter center={[activeCoords.lat, activeCoords.lon]} />
                                                 <MapClickHandler onMapClick={(lat, lon) => fetchAddressAndCadastre(lat, lon)} />
+
+                                                {/* INJECTION DU GESTIONNAIRE HORS-LIGNE POUR OSM (Remplace l'ancienne tuile standard) */}
+                                                <OfflineMapManager />
+
                                                 <LayersControl position="topright">
-                                                    <LayersControl.BaseLayer name="Plan (OSM)"><TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" /></LayersControl.BaseLayer>
                                                     <LayersControl.BaseLayer checked name="Satellite (IGN)">
                                                         <TileLayer url="https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}" maxZoom={19} />
                                                     </LayersControl.BaseLayer>
@@ -737,7 +770,6 @@ export default function SaisieRecolement() {
                                 </div>
                             </div>
 
-                            {/* --- GESTION DES REPÈRES --- */}
                             <div className="pt-4 border-t border-gray-200 mt-4">
                                 <div className="flex justify-between items-center mb-3">
                                     <span className="block text-sm font-bold text-gray-800">Repères ({reperesList.length})</span>
@@ -763,7 +795,6 @@ export default function SaisieRecolement() {
                                 <textarea {...register("observations_localisation" as keyof RecoletBoite)} rows={2} className={`w-full p-3 border rounded-lg text-lg outline-none transition-colors ${getFieldBg('observations_localisation' as keyof RecoletBoite)}`} />
                             </div>
 
-                            {/* PHOTO SITUATION */}
                             <div className="pt-3 border-t border-gray-200">
                                 <label className="block text-sm font-bold text-gray-800 mb-2">📸 Photo Situation</label>
                                 {photoPreviews.photo_situation ? (
@@ -781,7 +812,6 @@ export default function SaisieRecolement() {
                         </div>
                     </section>
 
-                    {/* --- SECTION 2 : CARACTÉRISTIQUES PHYSIQUES --- */}
                     {!nonTrouvee && (
                         <section className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
                             <h2 className="text-xl font-bold mb-4 text-blue-800 border-b pb-2">2. Caractéristiques Physiques</h2>
@@ -856,7 +886,6 @@ export default function SaisieRecolement() {
                                     <textarea {...register("observations_physiques")} rows={3} className={`w-full p-3 border rounded-lg text-lg outline-none transition-colors ${getFieldBg('observations_physiques')}`} />
                                 </div>
 
-                                {/* PHOTO COUVERCLE */}
                                 <div className="pt-3 border-t border-gray-200">
                                     <label className="block text-sm font-bold text-gray-800 mb-2">📸 Photo Couvercle</label>
                                     {photoPreviews.photo_couvercle ? (
@@ -875,7 +904,6 @@ export default function SaisieRecolement() {
                         </section>
                     )}
 
-                    {/* --- SECTION 3 : ÉCOULEMENT & DIAGNOSTIC --- */}
                     {!nonTrouvee && (
                         <section className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
                             <h2 className="text-xl font-bold mb-4 text-blue-800 border-b pb-2">3. Écoulement & Diagnostic</h2>
@@ -932,7 +960,6 @@ export default function SaisieRecolement() {
                                     <input {...register("action_preconisee")} className={`w-full p-3 border rounded-lg text-lg outline-none transition-colors ${getFieldBg('action_preconisee')}`} />
                                 </div>
 
-                                {/* PHOTO INTERIEUR */}
                                 <div className="pt-3 border-t border-gray-200">
                                     <label className="block text-sm font-bold text-gray-800 mb-2">📸 Photo Intérieur</label>
                                     {photoPreviews.photo_interieur ? (
@@ -951,7 +978,6 @@ export default function SaisieRecolement() {
                         </section>
                     )}
 
-                    {/* --- BOUTON DE SOUMISSION --- */}
                     <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-200 shadow-md z-40">
                         <button
                             type="submit"
@@ -964,7 +990,6 @@ export default function SaisieRecolement() {
                 </form>
             )}
 
-            {/* --- MODALE AJOUT REPÈRE --- */}
             {isRepereModalOpen && (
                 <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
                     <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
