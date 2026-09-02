@@ -241,7 +241,7 @@ export default function SaisieRecolement() {
             recognitionRef.current.stop();
         }
 
-        const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
         if (!SpeechRecognition) {
             alert("La dictée vocale n'est pas supportée nativement sur ce navigateur. Essayez sur Chrome ou Safari.");
@@ -422,9 +422,9 @@ export default function SaisieRecolement() {
         }
 
         data.reperes = reperesList;
-        data.photo_situation = situationUrl as any;
-        data.photo_couvercle = couvercleUrl as any;
-        data.photo_interieur = interieurUrl as any;
+        data.photo_situation_url = situationUrl as any;
+        data.photo_couvercle_url = couvercleUrl as any;
+        data.photo_interieur_url = interieurUrl as any;
 
         if (activeCoords) {
             data.latitude = activeCoords.lat;
@@ -1108,8 +1108,8 @@ export default function SaisieRecolement() {
                                         type="button"
                                         onClick={() => toggleDictation('description', true)}
                                         className={`flex items-center space-x-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors border shadow-sm ${listeningField === 'modal_description'
-                                                ? 'bg-red-600 text-white border-red-700 animate-pulse'
-                                                : 'bg-white text-blue-700 border-blue-200 hover:bg-blue-50 active:bg-blue-100'
+                                            ? 'bg-red-600 text-white border-red-700 animate-pulse'
+                                            : 'bg-white text-blue-700 border-blue-200 hover:bg-blue-50 active:bg-blue-100'
                                             }`}
                                     >
                                         <span>{listeningField === 'modal_description' ? '⏹️ Arrêter' : '🎤 Dicter'}</span>
@@ -1142,8 +1142,8 @@ export default function SaisieRecolement() {
                                         type="button"
                                         onClick={() => toggleDictation('observations', true)}
                                         className={`flex items-center space-x-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors border shadow-sm ${listeningField === 'modal_observations'
-                                                ? 'bg-red-600 text-white border-red-700 animate-pulse'
-                                                : 'bg-white text-blue-700 border-blue-200 hover:bg-blue-50 active:bg-blue-100'
+                                            ? 'bg-red-600 text-white border-red-700 animate-pulse'
+                                            : 'bg-white text-blue-700 border-blue-200 hover:bg-blue-50 active:bg-blue-100'
                                             }`}
                                     >
                                         <span>{listeningField === 'modal_observations' ? '⏹️ Arrêter' : '🎤 Dicter'}</span>
