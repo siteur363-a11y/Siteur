@@ -67,6 +67,10 @@ export interface RecoletBoite {
   photo_couvercle_url?: string;
   photo_interieur_url?: string;
 
+  photo_situation?: string | null;
+  photo_couvercle?: string | null;
+  photo_interieur?: string | null;
+
   created_at?: string;
   updated_at?: string;
   created_by?: string;
