@@ -21,9 +21,19 @@ export interface ParcelleItem {
   geom: any; // Géométrie GeoJSON (Polygon / MultiPolygon)
 }
 
+// --- NOUVELLE INTERFACE POUR LES ADRESSES ---
+export interface AdresseItem {
+  id?: number;
+  city?: string;
+  house_number?: string;
+  street?: string;
+  geometry: any; // Géométrie GeoJSON de type Point { type: "Point", coordinates: [lon, lat] }
+}
+
 export class OfflineDatabase extends Dexie {
   pendingSync!: Table<PendingSyncItem, number>;
   parcelles!: Table<ParcelleItem, number>;
+  adresses!: Table<AdresseItem, number>; // <--- Déclaration de la table adresses
 
   constructor() {
     super('SiteurOfflineDB_V2');
@@ -37,6 +47,13 @@ export class OfflineDatabase extends Dexie {
     this.version(3).stores({
       pendingSync: '++id, createdAt',
       parcelles: '++id, section, numero, codeInsee'
+    });
+
+    // Version 4 : Ajout de la table adresses locales
+    this.version(4).stores({
+      pendingSync: '++id, createdAt',
+      parcelles: '++id, section, numero, codeInsee',
+      adresses: '++id, city, street'
     });
   }
 }

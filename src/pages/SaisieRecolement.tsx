@@ -201,6 +201,84 @@ export default function SaisieRecolement() {
         setIsLoadingHist(false);
     };
 
+// --- FONCTION D'IMPORTATION DES DONNÉES HORS-LIGNE (PARCELLES GEOJSON & ADRESSES CSV BAL) ---
+    const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>, type: 'parcelles' | 'adresses') => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        try {
+            const text = await file.text();
+
+            if (type === 'parcelles') {
+                const json = JSON.parse(text);
+                if (!json.features || !Array.isArray(json.features)) {
+                    alert("Format GeoJSON invalide.");
+                    return;
+                }
+                const parcellesToInsert = json.features.map((feat: any) => ({
+                    section: feat.properties.section,
+                    numero: feat.properties.numero,
+                    codeInsee: feat.properties.code_insee || feat.properties.insee,
+                    geom: feat.geometry
+                }));
+                await offlineDb.parcelles.clear();
+                await offlineDb.parcelles.bulkAdd(parcellesToInsert);
+                alert(`✅ ${parcellesToInsert.length} parcelles stockées hors-ligne !`);
+            } 
+            else if (type === 'adresses') {
+                // Lecture du fichier CSV BAL
+                const lines = text.split('\n').filter(line => line.trim() !== '');
+                if (lines.length < 2) {
+                    alert("Fichier CSV vide ou invalide.");
+                    return;
+                }
+
+                const headers = lines[0].split(';').map(h => h.trim());
+                const latIdx = headers.indexOf('lat');
+                const longIdx = headers.indexOf('long');
+                const numeroIdx = headers.indexOf('numero');
+                const voieNomIdx = headers.indexOf('voie_nom');
+                const communeNomIdx = headers.indexOf('commune_nom');
+
+                if (latIdx === -1 || longIdx === -1) {
+                    alert("Colonnes 'lat' ou 'long' introuvables dans le fichier CSV BAL.");
+                    return;
+                }
+
+                const adressesToInsert = [];
+                for (let i = 1; i < lines.length; i++) {
+                    const row = lines[i].split(';');
+                    if (row.length > Math.max(latIdx, longIdx)) {
+                        const lat = parseFloat(row[latIdx]);
+                        const lon = parseFloat(row[longIdx]);
+                        const numero = numeroIdx !== -1 ? row[numeroIdx]?.trim() : '';
+                        const street = voieNomIdx !== -1 ? row[voieNomIdx]?.trim() : '';
+                        const city = communeNomIdx !== -1 ? row[communeNomIdx]?.trim() : '';
+
+                        if (!isNaN(lat) && !isNaN(lon)) {
+                            adressesToInsert.push({
+                                city: city,
+                                house_number: numero,
+                                street: street,
+                                geometry: {
+                                    type: "Point",
+                                    coordinates: [lon, lat]
+                                }
+                            });
+                        }
+                    }
+                }
+
+                await (offlineDb as any).adresses.clear();
+                await (offlineDb as any).adresses.bulkAdd(adressesToInsert);
+                alert(`✅ ${adressesToInsert.length} adresses stockées hors-ligne !`);
+            }
+        } catch (error) {
+            console.error("Erreur lors de l'import :", error);
+            alert("Erreur lors de la lecture du fichier.");
+        }
+    };
+
     const handleEditRecord = (record: any) => {
         setEditId(record.id || record.id_ouvrage);
         reset(record);
@@ -368,17 +446,40 @@ export default function SaisieRecolement() {
             // 1. COMPORTEMENT HORS-LIGNE (TURF.JS)
             if (!isOnline) {
                 console.log("Mode hors-ligne détecté : recherche spatiale locale via Turf...");
+                const pt = turf.point([lon, lat]);
 
+                // 1. Recherche de la parcelle (déjà présent dans votre code)
                 if ((offlineDb as any).parcelles) {
                     const parcelles = await (offlineDb as any).parcelles.toArray();
-                    const pt = turf.point([lon, lat]);
+                    const foundParcelle = parcelles.find((p: any) => p.geom && turf.booleanPointInPolygon(pt, p.geom));
 
-                    const found = parcelles.find((p: any) => p.geom && turf.booleanPointInPolygon(pt, p.geom));
+                    if (foundParcelle) {
+                        setValue('section_cadastrale', foundParcelle.section || '');
+                        setValue('parcelle_cadastrale', foundParcelle.numero || '');
+                    }
+                }
 
-                    if (found) {
-                        setValue('section_cadastrale', found.section || '');
-                        setValue('parcelle_cadastrale', found.numero || '');
-                        console.log("✅ Parcelle trouvée localement :", found.section, found.numero);
+                // 2. Recherche de l'adresse la plus proche (À AJOUTER)
+                if ((offlineDb as any).adresses) {
+                    const adresses = await (offlineDb as any).adresses.toArray();
+                    let nearestAddress: any = null;
+                    let minDistance = Infinity;
+
+                    adresses.forEach((addr: any) => {
+                        if (addr.geometry) {
+                            const addrPoint = turf.point(addr.geometry.coordinates);
+                            const distance = turf.distance(pt, addrPoint, { units: 'meters' });
+                            if (distance < minDistance) {
+                                minDistance = distance;
+                                nearestAddress = addr;
+                            }
+                        }
+                    });
+
+                    if (nearestAddress && minDistance < 50) { // Seuil de tolérance de 50 mètres
+                        setValue('commune', (nearestAddress.city || '') as any);
+                        setValue('voie_numero', (nearestAddress.house_number || '') as any);
+                        setValue('voie_nom', (nearestAddress.street || '') as any);
                     }
                 }
                 return;
@@ -557,6 +658,21 @@ export default function SaisieRecolement() {
         <div className="max-w-2xl mx-auto p-4 pb-24 bg-gray-50 min-h-screen">
             <div className={`p-2 mb-4 text-center font-bold text-white rounded-md ${isOnline ? 'bg-green-600' : 'bg-red-600'}`}>
                 {isOnline ? '🟢 En Ligne (Cloud)' : '🔴 Hors Ligne (Sauvegarde Locale)'}
+            </div>
+
+{/* --- SECTION D'IMPORTATION DES DONNÉES LOCALES (HORS-LIGNE) --- */}
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-4">
+                <h3 className="text-sm font-bold text-gray-700 mb-2">📥 Chargement des données hors-ligne (Commune)</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <label className="flex flex-col p-2 border border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 text-center">
+                        <span className="font-medium text-blue-600">📂 Importer Parcelles (.geojson)</span>
+                        <input type="file" accept=".geojson,.json" onChange={(e) => handleImportFile(e, 'parcelles')} className="hidden" />
+                    </label>
+                    <label className="flex flex-col p-2 border border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 text-center">
+                        <span className="font-medium text-blue-600">📂 Importer Adresses (.csv BAL)</span>
+                        <input type="file" accept=".csv" onChange={(e) => handleImportFile(e, 'adresses')} className="hidden" />
+                    </label>
+                </div>
             </div>
 
             <h1 className="text-2xl font-bold mb-4 text-gray-800">Fiche de Récolement</h1>
