@@ -6,6 +6,7 @@ import { useGeolocation } from '../hooks/useGeolocation';
 import type { RecoletBoite } from '../types/database';
 import { offlineDb } from '../db/offlineDb';
 import { useSyncQueue } from '../hooks/useSyncQueue';
+import imageCompression from 'browser-image-compression';
 
 // Imports pour la carte interactive Leaflet (avec LayersControl)
 import { MapContainer, TileLayer, Marker, Popup, WMSTileLayer, LayersControl, useMapEvents, useMap } from 'react-leaflet';
@@ -220,12 +221,28 @@ export default function SaisieRecolement() {
     };
 
     // --- GESTION LOCALE DES PHOTOS ---
-    const handlePhotoCapture = (photoType: 'photo_situation' | 'photo_couvercle' | 'photo_interieur', e: React.ChangeEvent<HTMLInputElement>) => {
+    const handlePhotoCapture = async (
+        photoType: 'photo_situation' | 'photo_couvercle' | 'photo_interieur',
+        e: React.ChangeEvent<HTMLInputElement>
+    ) => {
         const file = e.target.files?.[0];
         if (!file) return;
-        const previewUrl = URL.createObjectURL(file);
-        setPhotoFiles(prev => ({ ...prev, [photoType]: file }));
-        setPhotoPreviews(prev => ({ ...prev, [photoType]: previewUrl }));
+
+        const options = {
+            maxSizeMB: 0.8,          // Limite le poids à ~800 Ko
+            maxWidthOrHeight: 1920,  // Redimensionne en Full HD max
+            useWebWorker: true       // Traitement fluide en arrière-plan
+        };
+
+        try {
+            const compressedFile = await imageCompression(file, options);
+            const previewUrl = URL.createObjectURL(compressedFile);
+
+            setPhotoFiles(prev => ({ ...prev, [photoType]: compressedFile }));
+            setPhotoPreviews(prev => ({ ...prev, [photoType]: previewUrl }));
+        } catch (error) {
+            console.error("Erreur lors de la compression de l'image :", error);
+        }
     };
 
     const handleRemovePhoto = (photoType: 'photo_situation' | 'photo_couvercle' | 'photo_interieur') => {
@@ -422,9 +439,9 @@ export default function SaisieRecolement() {
             if (location.accuracy) data.precision_gps = location.accuracy;
         }
 
-if (isOnline) {
+        if (isOnline) {
             let error;
-            
+
             // Nettoyage strict : suppression des variables temporaires du formulaire et des champs auto
             const payload = { ...data } as any;
             delete payload.id;
@@ -433,15 +450,15 @@ if (isOnline) {
             delete payload.photo_couvercle;
             delete payload.photo_interieur;
 
-if (editId) {
+            if (editId) {
                 // MISE À JOUR (UPDATE)
                 // CORRECTION : Tolère les entiers convertis en texte (ex: "45")
-                const isTechnicalId = typeof editId === 'number' || 
-                                      (typeof editId === 'string' && /^\d+$/.test(editId)) || 
-                                      (typeof editId === 'string' && /^[0-9a-fA-F-]{36}$/.test(editId));
-                
+                const isTechnicalId = typeof editId === 'number' ||
+                    (typeof editId === 'string' && /^\d+$/.test(editId)) ||
+                    (typeof editId === 'string' && /^[0-9a-fA-F-]{36}$/.test(editId));
+
                 const searchColumn = isTechnicalId ? 'id' : 'id_ouvrage';
-                
+
                 const res = await supabase
                     .from('recolements_boites')
                     .update(payload)
@@ -480,8 +497,16 @@ if (editId) {
                 return;
             }
             try {
-                await offlineDb.pendingSync.add({ data, createdAt: new Date().toISOString() } as any);
-                alert('📦 Hors-ligne : Relevé sauvegardé dans la mémoire du téléphone !');
+                await offlineDb.pendingSync.add({
+                    data,
+                    localPhotos: {
+                        situation: photoFiles.photo_situation || undefined,
+                        couvercle: photoFiles.photo_couvercle || undefined,
+                        interieur: photoFiles.photo_interieur || undefined,
+                    },
+                    createdAt: new Date().toISOString(),
+                });
+                alert('📦 Relevé et photos sauvegardés localement sur la tablette !');
                 resetSaisie();
             } catch (err: any) {
                 alert(`Erreur de stockage local : ${err.message}`);
