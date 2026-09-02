@@ -421,10 +421,15 @@ export default function SaisieRecolement() {
             }
         }
 
-        data.reperes = reperesList;
+data.reperes = reperesList;
+
         data.photo_situation_url = situationUrl as any;
         data.photo_couvercle_url = couvercleUrl as any;
         data.photo_interieur_url = interieurUrl as any;
+
+        data.photo_situation = situationUrl as any;
+        data.photo_couvercle = couvercleUrl as any;
+        data.photo_interieur = interieurUrl as any;
 
         if (activeCoords) {
             data.latitude = activeCoords.lat;
