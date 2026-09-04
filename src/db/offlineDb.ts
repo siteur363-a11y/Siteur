@@ -8,6 +8,7 @@ export interface PendingSyncItem {
     situation?: File;
     couvercle?: File;
     interieur?: File;
+    photos_interieur?: File[];
   };
   createdAt: string;
 }
