@@ -54,6 +54,8 @@ function MapClickHandler({ onMapClick }: { onMapClick: (lat: number, lon: number
 // Indicateur de zoom en temps réel
 function ZoomIndicator() {
     const [zoom, setZoom] = useState(18);
+    const map = useMap(); 
+
     useMapEvents({
         zoom() {
             setZoom(map.getZoom());
