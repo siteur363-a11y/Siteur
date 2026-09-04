@@ -140,6 +140,7 @@ export default function SaisieRecolement() {
     const [filterCommune, setFilterCommune] = useState<string>('');
     const [filterNumero, setFilterNumero] = useState<string>('');
     const [filterRue, setFilterRue] = useState<string>('');
+    const [filterNonTrouvee, setFilterNonTrouvee] = useState<string>('');
 
     const [activeTab, setActiveTab] = useState<'saisie' | 'historique'>('saisie');
     const [historique, setHistorique] = useState<any[]>([]);
@@ -165,12 +166,12 @@ export default function SaisieRecolement() {
         parcelle_cadastrale?: string;
         id_ouvrage?: string;
     }>({});
-    
+
     // Correction du typage : on garantit la gestion du tableau de photos intérieur
     const [exportPhotoPreviews, setExportPhotoPreviews] = useState<{
         situation: string | null;
         couvercle: string | null;
-        photos_interieur: string[]; 
+        photos_interieur: string[];
     }>({ situation: null, couvercle: null, photos_interieur: [] });
 
     // Repères Modal
@@ -775,7 +776,7 @@ export default function SaisieRecolement() {
                     data.photo_couvercle_url = null as any;
                     data.photo_couvercle = null as any;
                 }
-                
+
                 // Correction pour l'upload d'un tableau de photos multiples
                 if (photoFiles.photos_interieur && photoFiles.photos_interieur.length > 0) {
                     const urls = await Promise.all(photoFiles.photos_interieur.map(f => uploadToCloudinary(f)));
@@ -880,12 +881,21 @@ export default function SaisieRecolement() {
         }
     };
 
-    const historiqueFiltre = historique.filter((rec) => {
+const historiqueFiltre = historique.filter((rec) => {
         const matchDate = filterDate ? rec.date_recolement === filterDate : true;
         const matchCommune = filterCommune ? rec.commune === filterCommune : true;
         const matchNumero = filterNumero ? rec.voie_numero === filterNumero : true;
         const matchRue = filterRue ? rec.voie_nom === filterRue : true;
-        return matchDate && matchCommune && matchNumero && matchRue;
+        
+        // 👇 Logique de filtrage pour non_trouvee
+        let matchNonTrouvee = true;
+        if (filterNonTrouvee === 'trouve') {
+            matchNonTrouvee = !rec.non_trouvee; // true si non_trouvee est faux ou null/undefined
+        } else if (filterNonTrouvee === 'non_trouve') {
+            matchNonTrouvee = !!rec.non_trouvee; // true si non_trouvee est vrai
+        }
+
+        return matchDate && matchCommune && matchNumero && matchRue && matchNonTrouvee;
     });
 
     return (
@@ -992,6 +1002,19 @@ export default function SaisieRecolement() {
                                     {uniqueRues.map((rue) => (
                                         <option key={rue} value={rue}>{rue}</option>
                                     ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 mb-1">Statut ouvrage</label>
+                                <select
+                                    value={filterNonTrouvee}
+                                    onChange={(e) => setFilterNonTrouvee(e.target.value)}
+                                    className="w-full p-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                                >
+                                    <option value="">Tous les statuts</option>
+                                    <option value="trouve">Trouvés (Actifs)</option>
+                                    <option value="non_trouve">Non trouvés / Inaccessibles</option>
                                 </select>
                             </div>
 
