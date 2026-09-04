@@ -4,7 +4,7 @@ import type { RecoletBoite } from '../types/database';
 /**
  * Télécharge une image depuis une URL (Cloudinary) et la convertit en ArrayBuffer.
  */
-const fetchImageAsBuffer = async (url: string): Promise<ArrayBuffer | null> => {
+/*const fetchImageAsBuffer = async (url: string): Promise<ArrayBuffer | null> => {
     try {
         const response = await fetch(url);
         if (!response.ok) throw new Error("Erreur réseau lors du téléchargement de l'image");
@@ -14,6 +14,7 @@ const fetchImageAsBuffer = async (url: string): Promise<ArrayBuffer | null> => {
         return null;
     }
 };
+*/
 
 const formatDateToFrench = (dateString: string | null | undefined): string => {
     if (!dateString) return '';
@@ -177,6 +178,7 @@ export const exportRecolementToExcel = async (record: RecoletBoite): Promise<voi
         // =========================================================
         // 4. GESTION DES PHOTOS
         // =========================================================
+        /*
         const insertImage = async (url: string | null | undefined, range: string) => {
             if (!url) return;
             const imgBuffer = await fetchImageAsBuffer(url);
@@ -188,6 +190,7 @@ export const exportRecolementToExcel = async (record: RecoletBoite): Promise<voi
                 worksheet.addImage(imageId, range);
             }
         };
+        */
 
         // Estimation de la taille max en pixels de ta zone (ex: ~250px de large sur ~180px de haut)
         const MAX_IMG_WIDTH = 460;
