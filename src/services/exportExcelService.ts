@@ -16,23 +16,85 @@ async function insertImageProportionnelle(
     worksheet: any,
     workbook: any,
     imageUrl: string,
-    startCell: string, // Ex: 'B38'
+    startCell: string,
     maxPixelWidth: number,
-    maxPixelHeight: number
+    maxPixelHeight: number,
+    flagOptions?: {
+        showFlag?: boolean;
+        flagX?: number;
+        flagY?: number;
+        flagSize?: number;
+    }
 ) {
     if (!imageUrl) return;
 
     try {
+        // 1. Chargement de l'image de fond
         const response = await fetch(imageUrl);
         if (!response.ok) return;
         const blob = await response.blob();
-        const arrayBuffer = await blob.arrayBuffer();
+
+        // Si des options de drapeau sont fournies et activées, on fusionne via un Canvas
+        let imageToProcessBlob = blob;
+        if (flagOptions && flagOptions.showFlag !== false && flagOptions.flagX !== undefined && flagOptions.flagY !== undefined) {
+            imageToProcessBlob = await new Promise<Blob>((resolve) => {
+                const img = new Image();
+                img.crossOrigin = "anonymous";
+                img.onload = async () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) {
+                        resolve(blob);
+                        return;
+                    }
+
+                    // Dessiner l'image de fond
+                    ctx.drawImage(img, 0, 0);
+
+                    // Charger et dessiner l'icône du drapeau par-dessus
+
+                    const flagImg = new Image();
+                    flagImg.crossOrigin = "anonymous";
+                    flagImg.src = '/Drapeaux.png';
+
+                    flagImg.onload = () => {
+                        const baseSize = flagOptions.flagSize || 40;
+                        const scaleFactor = img.width / 400;
+                        const targetHeight = Math.max(24, baseSize * scaleFactor);
+
+                        // Calcul automatique de la largeur selon le ratio réel de l'image originale
+                        const imgRatio = flagImg.naturalWidth && flagImg.naturalHeight
+                            ? flagImg.naturalWidth / flagImg.naturalHeight
+                            : 1;
+
+                        const finalFlagWidth = targetHeight * imgRatio;
+                        const finalFlagHeight = targetHeight;
+
+                        // Ancrage basé sur le bas/centre du drapeau
+                        const xPx = (flagOptions.flagX! / 100) * img.width - finalFlagWidth / 2;
+                        const yPx = (flagOptions.flagY! / 100) * img.height - finalFlagHeight;
+
+                        // Dessin en respectant le ratio calculé
+                        ctx.drawImage(flagImg, xPx, yPx, finalFlagWidth, finalFlagHeight);
+
+                        canvas.toBlob ? canvas.toBlob((b) => resolve(b || blob), 'image/jpeg', 0.9) : resolve(blob);
+                    };
+                    flagImg.onerror = () => resolve(blob);
+                };
+                img.onerror = () => resolve(blob);
+                img.src = URL.createObjectURL(blob);
+            });
+        }
+
+        const arrayBuffer = await imageToProcessBlob.arrayBuffer();
 
         const dimensions: { width: number; height: number } = await new Promise((resolve) => {
             const img = new Image();
             img.onload = () => resolve({ width: img.width, height: img.height });
             img.onerror = () => resolve({ width: maxPixelWidth, height: maxPixelHeight });
-            img.src = URL.createObjectURL(blob);
+            img.src = URL.createObjectURL(imageToProcessBlob);
         });
 
         const ratio = Math.min(
@@ -42,11 +104,9 @@ async function insertImageProportionnelle(
         const finalWidth = Math.round(dimensions.width * ratio);
         const finalHeight = Math.round(dimensions.height * ratio);
 
-        const extension = imageUrl.toLowerCase().includes('.png') ? 'png' : 'jpeg';
-
         const imageId = workbook.addImage({
             buffer: arrayBuffer,
-            extension: extension,
+            extension: 'jpeg',
         });
 
         const colLetter = startCell.replace(/[0-9]/g, '');
@@ -152,11 +212,25 @@ export const exportRecolementToExcel = async (record: RecoletBoite): Promise<voi
         const MAX_IMG_HEIGHT = 390;
 
         // Photos fixes (Situation et Couvercle)
-        await insertImageProportionnelle(worksheet, workbook, (record as any).photo_situation_url, 'A36', MAX_IMG_WIDTH, MAX_IMG_HEIGHT);
+        // Photos fixes (Situation avec son drapeau incrusté, et Couvercle)
+        await insertImageProportionnelle(
+            worksheet,
+            workbook,
+            (record as any).photo_situation_url,
+            'A36',
+            MAX_IMG_WIDTH,
+            MAX_IMG_HEIGHT,
+            {
+                showFlag: (record as any).show_situation_flag,
+                flagX: (record as any).flag_x,
+                flagY: (record as any).flag_y,
+                flagSize: (record as any).flag_flag_size ?? (record as any).flag_size
+            }
+        );
         await insertImageProportionnelle(worksheet, workbook, (record as any).photo_couvercle_url, 'D36', MAX_IMG_WIDTH, MAX_IMG_HEIGHT);
 
         // Photos intérieures (Supporte le tableau multiple `photos_interieur_urls` avec repli rétro-compatible sur `photo_interieur_url`)
-        const photosInterieur: string[] = 
+        const photosInterieur: string[] =
             Array.isArray((record as any).photos_interieur_urls) && (record as any).photos_interieur_urls.length > 0
                 ? (record as any).photos_interieur_urls
                 : ((record as any).photo_interieur_url ? [(record as any).photo_interieur_url] : []);
@@ -182,7 +256,7 @@ export const exportRecolementToExcel = async (record: RecoletBoite): Promise<voi
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
 
-    }catch (error) {
+    } catch (error) {
         console.error("Erreur détaillée lors de l'export Excel :", error);
         throw error;
     }

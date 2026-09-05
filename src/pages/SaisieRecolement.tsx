@@ -132,6 +132,39 @@ const uploadToCloudinary = async (file: File): Promise<string | null> => {
 };
 
 export default function SaisieRecolement() {
+
+    // États pour le drapeau interactif (image personnalisée + taille + position)
+    const [showSituationFlag, setShowSituationFlag] = useState<boolean>(true);
+    const [situationFlagPos, setSituationFlagPos] = useState<{ x: number; y: number }>({ x: 50, y: 50 });
+    const [flagSize, setFlagSize] = useState<number>(40); // Largeur en pixels par défaut
+    const [isDraggingFlag, setIsDraggingFlag] = useState<boolean>(false);
+    const situationImageRef = useRef<HTMLDivElement>(null);
+    const [isFlagEditModalOpen, setIsFlagEditModalOpen] = useState<boolean>(false);
+
+    // Gestionnaires de glisser-déposer (tactile et souris) pour le drapeau
+    const handlePointerDown = (e: React.PointerEvent) => {
+        e.preventDefault();
+        setIsDraggingFlag(true);
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    };
+
+    const handlePointerMove = (e: React.PointerEvent) => {
+        if (!isDraggingFlag || !situationImageRef.current) return;
+        const rect = situationImageRef.current.getBoundingClientRect();
+        const x = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+        const y = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
+        setSituationFlagPos({ x, y });
+    };
+
+    const handlePointerUp = (e: React.PointerEvent) => {
+        if (isDraggingFlag) {
+            setIsDraggingFlag(false);
+            try {
+                (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+            } catch (err) { }
+        }
+    };
+
     const isOnline = useOnlineStatus();
     const { location, requestLocation } = useGeolocation();
 
@@ -167,7 +200,6 @@ export default function SaisieRecolement() {
         id_ouvrage?: string;
     }>({});
 
-    // Correction du typage : on garantit la gestion du tableau de photos intérieur
     const [exportPhotoPreviews, setExportPhotoPreviews] = useState<{
         situation: string | null;
         couvercle: string | null;
@@ -216,7 +248,6 @@ export default function SaisieRecolement() {
     const lastFetchedCoords = useRef<{ lat: number; lon: number } | null>(null);
     const formValues = watch();
 
-    // Listes d'options uniques extraites dynamiquement de l'historique
     const uniqueDates = useMemo(() => {
         const list = historique.map(rec => rec.date_recolement).filter(Boolean);
         return Array.from(new Set(list)).sort((a, b) => b.localeCompare(a));
@@ -237,7 +268,6 @@ export default function SaisieRecolement() {
         return Array.from(new Set(list)).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
     }, [historique]);
 
-    // Rafraîchissement du nombre de fiches en attente
     const refreshPendingCount = async () => {
         try {
             const count = await offlineDb.pendingSync.count();
@@ -273,7 +303,6 @@ export default function SaisieRecolement() {
         setIsLoadingHist(false);
     };
 
-    // --- LOGIQUE DE L'EXPORTATION IN-LINE PAS-À-PAS ---
     const handleOpenExportModal = async () => {
         const items = await offlineDb.pendingSync.toArray();
         if (items.length === 0) {
@@ -293,7 +322,6 @@ export default function SaisieRecolement() {
         const formData = { ...pendingItem.data };
         setExportForm(formData);
 
-        // Préparation des aperçus photos avec gestion correcte du tableau `photos_interieur`
         const situationUrl = pendingItem.localPhotos?.situation
             ? URL.createObjectURL(pendingItem.localPhotos.situation)
             : formData.photo_situation_url || null;
@@ -312,7 +340,6 @@ export default function SaisieRecolement() {
             photos_interieur: interieurUrls
         });
 
-        // Enrichissement automatique en ligne
         enrichPendingItem(pendingItem);
     };
 
@@ -409,7 +436,6 @@ export default function SaisieRecolement() {
         try {
             const finalData = { ...exportForm };
 
-            // Upload des photos vers Cloudinary si présentes localement
             if (currentPendingItem.localPhotos?.situation) {
                 const url = await uploadToCloudinary(currentPendingItem.localPhotos.situation);
                 if (url) finalData.photo_situation_url = url;
@@ -418,15 +444,13 @@ export default function SaisieRecolement() {
                 const url = await uploadToCloudinary(currentPendingItem.localPhotos.couvercle);
                 if (url) finalData.photo_couvercle_url = url;
             }
-            // Correction pour le tableau de photos intérieures
             if (currentPendingItem.localPhotos?.photos_interieur && currentPendingItem.localPhotos.photos_interieur.length > 0) {
                 const urls = await Promise.all(currentPendingItem.localPhotos.photos_interieur.map((f: File) => uploadToCloudinary(f)));
                 const validUrls = urls.filter((u): u is string => u !== null);
                 finalData.photos_interieur_urls = validUrls;
-                if (validUrls.length > 0) finalData.photo_interieur_url = validUrls[0]; // Retro-compatibilité
+                if (validUrls.length > 0) finalData.photo_interieur_url = validUrls[0];
             }
 
-            // Nettoyage des champs système/temporaires
             const payload = { ...finalData } as any;
             delete payload.id;
             delete payload.created_at;
@@ -492,6 +516,18 @@ export default function SaisieRecolement() {
         setEditId(record.id || record.id_ouvrage);
         reset(record);
         setReperesList(record.reperes || []);
+
+        // ➔ Restauration des paramètres du drapeau enregistrés dans Supabase
+        if (record.show_situation_flag !== undefined && record.show_situation_flag !== null) {
+            setShowSituationFlag(record.show_situation_flag);
+        }
+        if (record.flag_x !== undefined && record.flag_y !== undefined && record.flag_x !== null && record.flag_y !== null) {
+            setSituationFlagPos({ x: record.flag_x, y: record.flag_y });
+        }
+        if (record.flag_size !== undefined && record.flag_size !== null) {
+            setFlagSize(record.flag_size);
+        }
+
         if (record.latitude && record.longitude) {
             setActiveCoords({ lat: record.latitude, lon: record.longitude });
         } else {
@@ -517,6 +553,12 @@ export default function SaisieRecolement() {
         });
         setReperesList([]);
         setActiveCoords(null);
+
+        // ➔ Réinitialisation des états du drapeau
+        setShowSituationFlag(true);
+        setSituationFlagPos({ x: 50, y: 50 });
+        setFlagSize(40);
+
         setPhotoPreviews({ photo_situation: null, photo_couvercle: null, photos_interieur: [] });
         setPhotoFiles({ photo_situation: null, photo_couvercle: null, photos_interieur: [] });
     };
@@ -565,6 +607,11 @@ export default function SaisieRecolement() {
                 const previewUrl = URL.createObjectURL(compressedFile);
                 setPhotoFiles(prev => ({ ...prev, [photoType]: compressedFile }));
                 setPhotoPreviews(prev => ({ ...prev, [photoType]: previewUrl }));
+
+                // Ouvre automatiquement le modal pour positionner le drapeau dès la prise de photo
+                if (photoType === 'photo_situation') {
+                    setIsFlagEditModalOpen(true);
+                }
             }
         } catch (error) {
             console.error("Erreur de compression :", error);
@@ -655,7 +702,6 @@ export default function SaisieRecolement() {
         recognition.start();
     };
 
-    // RECHERCHE ADRESSE / CADASTRE ADAPTÉE HORS-LIGNE (TURF.JS)
     const fetchAddressAndCadastre = async (lat: number, lon: number) => {
         try {
             setActiveCoords({ lat, lon });
@@ -757,6 +803,11 @@ export default function SaisieRecolement() {
             if ((data as any)[key] === "") (data as any)[key] = null;
         });
 
+        (data as any).show_situation_flag = showSituationFlag;
+        (data as any).flag_x = showSituationFlag ? Number(situationFlagPos.x.toFixed(2)) : null;
+        (data as any).flag_y = showSituationFlag ? Number(situationFlagPos.y.toFixed(2)) : null;
+        (data as any).flag_size = showSituationFlag ? flagSize : null;
+
         if (isOnline) {
             try {
                 if (photoFiles.photo_situation) {
@@ -777,7 +828,6 @@ export default function SaisieRecolement() {
                     data.photo_couvercle = null as any;
                 }
 
-                // Correction pour l'upload d'un tableau de photos multiples
                 if (photoFiles.photos_interieur && photoFiles.photos_interieur.length > 0) {
                     const urls = await Promise.all(photoFiles.photos_interieur.map(f => uploadToCloudinary(f)));
                     const validUrls = urls.filter((u): u is string => u !== null);
@@ -869,7 +919,6 @@ export default function SaisieRecolement() {
         }
     };
 
-
     const handleExportExcel = async (record: RecoletBoite) => {
         try {
             setExportingId(record.id || record.id_ouvrage || null);
@@ -881,18 +930,17 @@ export default function SaisieRecolement() {
         }
     };
 
-const historiqueFiltre = historique.filter((rec) => {
+    const historiqueFiltre = historique.filter((rec) => {
         const matchDate = filterDate ? rec.date_recolement === filterDate : true;
         const matchCommune = filterCommune ? rec.commune === filterCommune : true;
         const matchNumero = filterNumero ? rec.voie_numero === filterNumero : true;
         const matchRue = filterRue ? rec.voie_nom === filterRue : true;
-        
-        // 👇 Logique de filtrage pour non_trouvee
+
         let matchNonTrouvee = true;
         if (filterNonTrouvee === 'trouve') {
-            matchNonTrouvee = !rec.non_trouvee; // true si non_trouvee est faux ou null/undefined
+            matchNonTrouvee = !rec.non_trouvee;
         } else if (filterNonTrouvee === 'non_trouve') {
-            matchNonTrouvee = !!rec.non_trouvee; // true si non_trouvee est vrai
+            matchNonTrouvee = !!rec.non_trouvee;
         }
 
         return matchDate && matchCommune && matchNumero && matchRue && matchNonTrouvee;
@@ -1288,10 +1336,46 @@ const historiqueFiltre = historique.filter((rec) => {
 
                             <div className="pt-3 border-t border-gray-200">
                                 <label className="block text-sm font-bold text-gray-800 mb-2">📸 Photo Situation</label>
+
                                 {photoPreviews.photo_situation ? (
-                                    <div className="relative inline-block bg-gray-100 p-1 rounded-lg border shadow-sm">
-                                        <img src={photoPreviews.photo_situation} alt="Situation" className="h-32 w-32 object-cover rounded" />
-                                        <button type="button" onClick={() => handleRemovePhoto('photo_situation')} className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-7 h-7 flex items-center justify-center font-bold">✕</button>
+                                    <div className="space-y-2">
+                                        {/* Vignette cliquable pour ouvrir l'éditeur (Modal) */}
+                                        <div
+                                            onClick={() => setIsFlagEditModalOpen(true)}
+                                            className="relative inline-block bg-gray-100 p-1 rounded-lg border shadow-sm cursor-pointer hover:ring-4 hover:ring-blue-300 transition-all overflow-hidden"
+                                        >
+                                            <img src={photoPreviews.photo_situation} alt="Situation" className="h-48 w-48 object-cover rounded block" />
+
+                                            {showSituationFlag && (
+                                                <div
+                                                    style={{
+                                                        left: `${situationFlagPos.x}%`,
+                                                        top: `${situationFlagPos.y}%`,
+                                                        width: `${flagSize}px`,
+                                                        transform: 'translate(-50%, -100%)'
+                                                    }}
+                                                    className="absolute z-20 pointer-events-none drop-shadow-md"
+                                                >
+                                                    <img
+                                                        src="/Drapeaux.png"
+                                                        alt="Drapeau situation"
+                                                        className="w-full h-auto"
+                                                    />
+                                                </div>
+                                            )}
+
+                                            <button
+                                                type="button"
+                                                onClick={(e) => { e.stopPropagation(); handleRemovePhoto('photo_situation'); }}
+                                                className="absolute top-2 right-2 bg-red-600 text-white rounded-full w-7 h-7 flex items-center justify-center font-bold shadow z-30"
+                                            >
+                                                ✕
+                                            </button>
+
+                                            <div className="absolute bottom-2 right-2 bg-blue-700 text-white text-xs px-2 py-1 rounded shadow font-bold pointer-events-none flex items-center gap-1">
+                                                <span>🔍</span> Ajuster le drapeau
+                                            </div>
+                                        </div>
                                     </div>
                                 ) : (
                                     <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
@@ -1516,6 +1600,94 @@ const historiqueFiltre = historique.filter((rec) => {
                 </div>
             )}
 
+            {/* MODAL DRAPEAU PLEIN ECRAN */}
+            {isFlagEditModalOpen && photoPreviews.photo_situation && (
+                <div className="fixed inset-0 bg-black/80 z-[70] flex items-center justify-center p-2 backdrop-blur-sm touch-none">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[95vh] overflow-hidden">
+                        <div className="px-4 py-3 bg-slate-800 text-white flex justify-between items-center">
+                            <h3 className="font-bold">Positionner le drapeau</h3>
+                            <button onClick={() => setIsFlagEditModalOpen(false)} className="text-xl font-bold p-1">✕</button>
+                        </div>
+
+                        <div className="p-4 bg-gray-50 border-b flex flex-wrap items-center justify-between gap-4">
+                            <div className="flex items-center space-x-3">
+                                <input
+                                    type="checkbox"
+                                    id="modal_show_situation_flag"
+                                    checked={showSituationFlag}
+                                    onChange={(e) => setShowSituationFlag(e.target.checked)}
+                                    className="w-5 h-5 text-blue-600 rounded cursor-pointer"
+                                />
+                                <label htmlFor="modal_show_situation_flag" className="font-medium text-gray-700 cursor-pointer">
+                                    Afficher le drapeau
+                                </label>
+                            </div>
+                            {showSituationFlag && (
+                                <div className="flex items-center space-x-2 flex-1 max-w-xs">
+                                    <span className="text-sm text-gray-600 font-medium whitespace-nowrap">Taille :</span>
+                                    <input
+                                        type="range"
+                                        min="20"
+                                        max="200"
+                                        value={flagSize}
+                                        onChange={(e) => setFlagSize(Number(e.target.value))}
+                                        className="w-full accent-blue-600 cursor-pointer"
+                                    />
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex-1 overflow-auto bg-gray-900 flex items-center justify-center relative touch-none p-4 min-h-[50vh]">
+                            <div
+                                ref={situationImageRef}
+                                onPointerMove={handlePointerMove}
+                                onPointerUp={handlePointerUp}
+                                onPointerLeave={handlePointerUp}
+                                className="relative inline-block select-none touch-none shadow-2xl border-2 border-gray-700"
+                            >
+                                <img
+                                    src={photoPreviews.photo_situation}
+                                    alt="Situation large"
+                                    style={{ maxHeight: '60vh' }}
+                                    className="w-auto block pointer-events-none"
+                                />
+
+                                {showSituationFlag && (
+                                    <div
+                                        onPointerDown={handlePointerDown}
+                                        style={{
+                                            left: `${situationFlagPos.x}%`,
+                                            top: `${situationFlagPos.y}%`,
+                                            width: `${flagSize}px`,
+                                            transform: 'translate(-50%, -100%)'
+                                        }}
+                                        className="absolute cursor-grab active:cursor-grabbing z-20 drop-shadow-xl touch-none"
+                                        title="Glissez pour positionner le drapeau"
+                                    >
+                                        <img
+                                            src="/Drapeaux.png"
+                                            alt="Drapeau situation"
+                                            className="w-full h-auto pointer-events-none drop-shadow-md"
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="p-4 bg-white flex justify-between items-center shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
+                            <p className="text-xs text-gray-500 italic hidden sm:block">💡 Glissez le drapeau pour le positionner précisément.</p>
+                            <button
+                                type="button"
+                                onClick={() => setIsFlagEditModalOpen(false)}
+                                className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold shadow-md active:bg-blue-700 w-full sm:w-auto"
+                            >
+                                Valider la position
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* MODAL EXPORT IN-LINE (REVUE ET VALIDATION PAS-À-PAS) */}
             {isExportModalOpen && exportForm && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
@@ -1725,58 +1897,22 @@ const historiqueFiltre = historique.filter((rec) => {
                         </div>
 
                         <div className="p-4 bg-gray-100 border-t border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-3">
-
-                            <div className="flex items-center gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const prevIdx = currentExportIndex - 1;
-                                        setCurrentExportIndex(prevIdx);
-                                        loadExportItemAtIndex(prevIdx, pendingItems);
-                                    }}
-                                    disabled={currentExportIndex === 0}
-                                    className="px-3 py-1.5 bg-white border rounded-lg text-xs font-bold disabled:opacity-40"
-                                >
-                                    ◀ Précédent
-                                </button>
-                                <span className="text-xs font-mono font-bold">
-                                    {currentExportIndex + 1} / {pendingItems.length}
-                                </span>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const nextIdx = currentExportIndex + 1;
-                                        setCurrentExportIndex(nextIdx);
-                                        loadExportItemAtIndex(nextIdx, pendingItems);
-                                    }}
-                                    disabled={currentExportIndex >= pendingItems.length - 1}
-                                    className="px-3 py-1.5 bg-white border rounded-lg text-xs font-bold disabled:opacity-40"
-                                >
-                                    Suivant ▶
-                                </button>
-                            </div>
-
-                            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-                                <button
-                                    type="button"
-                                    onClick={handleDeleteLocalDraft}
-                                    className="px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 border border-red-200 rounded-lg"
-                                >
-                                    🗑️ Supprimer
-                                </button>
-
-                                <button
-                                    type="button"
-                                    onClick={handleValidateAndExport}
-                                    disabled={isExporting}
-                                    className={`px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-lg shadow flex items-center gap-2 ${isExporting ? 'animate-pulse opacity-70' : ''}`}
-                                >
-                                    {isExporting ? '⏳ Exportation...' : '✅ Valider & Exporter'}
-                                </button>
-                            </div>
-
+                            <button
+                                type="button"
+                                onClick={handleDeleteLocalDraft}
+                                className="text-red-600 font-bold text-xs hover:underline flex items-center gap-1 w-full sm:w-auto"
+                            >
+                                🗑️ Supprimer le brouillon local
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleValidateAndExport}
+                                disabled={isExporting}
+                                className={`w-full sm:w-auto px-6 py-3 rounded-xl font-bold text-white shadow-md transition-colors ${isExporting ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+                            >
+                                {isExporting ? 'Exportation...' : '✔️ Valider & Exporter vers Supabase'}
+                            </button>
                         </div>
-
                     </div>
                 </div>
             )}

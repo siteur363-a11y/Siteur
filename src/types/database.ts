@@ -48,6 +48,12 @@ export interface RecoletBoite {
   longitude?: number | null;
   precision_gps?: number | null;
   
+// Drapeau de situation sur le plan
+  show_situation_flag?: boolean | null;
+  flag_x?: number | null;
+  flag_y?: number | null;
+  flag_size?: number | null;
+
   // Triangulation
   non_trouvee?: boolean | null;
   reperes?: Repere[] | null;
