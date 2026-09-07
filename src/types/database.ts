@@ -32,6 +32,10 @@ export interface RecoletBoite {
   id_ouvrage?: string | null; // Ex: 27638-AA0142-BR-01
   date_recolement?: string | null;
   technicien?: string | null;
+  materiau_conduit?: string;
+  etat_cadre?: string;
+  actions_preconisees?: string[];
+  action_precision?: string;
   
   // Localisation
   commune?: CommuneEnum | string | null;

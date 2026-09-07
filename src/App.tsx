@@ -1,4 +1,4 @@
-import SaisieRecolement from './pages/SaisieRecolement';
+import SaisieRecolement from './SaisieRecolement';
 
 function App() {
   return (
