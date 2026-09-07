@@ -624,66 +624,70 @@ export default function SaisieRecolement() {
         setValue('reperes', updatedList);
     };
 
-    const lastProcessedIndexRef = useRef<number>(0);
+const initialTextRef = useRef<string>("");
 
-    const toggleDictation = useCallback((field: string, isModal: boolean = false) => {
-        const trackingKey = isModal ? `modal_${field}` : field;
-        if (listeningField === trackingKey && recognitionRef.current) {
-            recognitionRef.current.stop();
-            return;
-        }
-        if (recognitionRef.current) recognitionRef.current.stop();
+const toggleDictation = useCallback((field: string, isModal: boolean = false) => {
+    const trackingKey = isModal ? `modal_${field}` : field;
+    if (listeningField === trackingKey && recognitionRef.current) {
+        recognitionRef.current.stop();
+        return;
+    }
+    if (recognitionRef.current) recognitionRef.current.stop();
 
-        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-        if (!SpeechRecognition) {
-            alert("La dictée vocale n'est pas supportée nativement sur ce navigateur.");
-            return;
-        }
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        alert("La dictée vocale n'est pas supportée nativement sur ce navigateur.");
+        return;
+    }
 
-        const recognition = new SpeechRecognition();
-        recognition.lang = 'fr-FR';
-        recognition.interimResults = true;
-        recognition.continuous = true;
-        recognition.maxAlternatives = 1;
-        recognitionRef.current = recognition;
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'fr-FR';
+    // 1. ✅ Désactivation des résultats intermédiaires pour éviter les doublons IME sur mobile
+    recognition.interimResults = false;
+    recognition.continuous = true;
+    recognition.maxAlternatives = 1;
+    recognitionRef.current = recognition;
 
-        // Réinitialisation de l'index au démarrage
-        lastProcessedIndexRef.current = 0;
+    // 2. ✅ Capture de la valeur initiale du champ au déclenchement de l'écoute
+    const baseText = isModal
+        ? (currentRepere[field as keyof typeof currentRepere] || "")
+        : (getValues(field as keyof RecoletBoite) || "");
+    initialTextRef.current = String(baseText);
 
-        recognition.onstart = () => {
-            lastProcessedIndexRef.current = 0;
-            setListeningField(trackingKey);
-        };
+    recognition.onstart = () => {
+        setListeningField(trackingKey);
+    };
 
-        recognition.onresult = (event: any) => {
-            let transcript = "";
+    recognition.onresult = (event: any) => {
+        let addedTranscript = "";
 
-            // On ne traite que les nouveaux résultats à partir du dernier index non traité
-            for (let i = lastProcessedIndexRef.current; i < event.results.length; ++i) {
-                if (event.results[i].isFinal) {
-                    transcript += " " + event.results[i][0].transcript;
-                    // On met à jour l'index pour ce bloc
-                    lastProcessedIndexRef.current = i + 1;
-                }
+        // 3. ✅ Utilisation de event.resultIndex (propriété native API, ignore les faux départs)
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+                addedTranscript += " " + event.results[i][0].transcript;
             }
+        }
 
-            if (transcript.trim()) {
-                if (isModal) {
-                    setCurrentRepere(prev => ({
-                        ...prev,
-                        [field]: ((prev[field as keyof typeof prev] || "") + " " + transcript.trim()).trim()
-                    }));
-                } else {
-                    const currentText = getValues(field as keyof RecoletBoite) || "";
-                    setValue(field as keyof RecoletBoite, (currentText + " " + transcript.trim()).trim() as any);
-                }
+        if (addedTranscript.trim()) {
+            // 4. ✅ Mise à jour sur la base de la référence stable sans relire le state/form
+            initialTextRef.current = (initialTextRef.current + " " + addedTranscript.trim()).trim();
+            const nextValue = initialTextRef.current;
+
+            if (isModal) {
+                setCurrentRepere(prev => ({
+                    ...prev,
+                    [field]: nextValue
+                }));
+            } else {
+                setValue(field as keyof RecoletBoite, nextValue as any);
             }
-        };
+        }
+    };
 
-        recognition.onerror = () => { setListeningField(null); recognitionRef.current = null; };
-        recognition.onend = () => { setListeningField(null); recognitionRef.current = null; };
-        recognition.start();
-    }, [listeningField, getValues, setValue]);
+    recognition.onerror = () => { setListeningField(null); recognitionRef.current = null; };
+    recognition.onend = () => { setListeningField(null); recognitionRef.current = null; };
+    recognition.start();
+}, [listeningField, getValues, setValue]);
 
     const fetchAddressAndCadastre = useCallback(async (lat: number, lon: number) => {
         try {
