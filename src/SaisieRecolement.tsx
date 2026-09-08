@@ -2,10 +2,21 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import imageCompression from 'browser-image-compression';
 import * as turf from '@turf/turf';
-import { MapContainer, TileLayer, Marker, Popup, WMSTileLayer, LayersControl } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, WMSTileLayer, LayersControl, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
+import L from 'leaflet'; // <-- Ajout de l'import Leaflet natif
 
 import { supabase } from './lib/supabase';
+
+// <-- Ajout de la définition de l'icône rouge
+const redIcon = new L.Icon({
+    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.3.1/images/marker-shadow.png',
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowSize: [41, 41]
+});
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { useGeolocation } from './hooks/useGeolocation';
 import type { RecoletBoite } from './types/database';
@@ -21,6 +32,26 @@ import { FlagEditModal } from './components/modals/FlagEditModal';
 import { ExportInlineModal } from './components/modals/ExportInlineModal';
 import { DeleteConfirmModal } from './components/modals/DeleteConfirmModal';
 import { HistoriqueTab } from './components/HistoriqueTab';
+
+// Helper pour ajuster automatiquement le zoom et le cadrage sur tous les points affichés
+function MapFitBounds({ markers }: { markers: { latitude: number; longitude: number }[] }) {
+    const map = useMap();
+
+    useEffect(() => {
+        const validMarkers = markers.filter(
+            (m) => typeof m.latitude === 'number' && typeof m.longitude === 'number'
+        );
+
+        if (validMarkers.length > 0) {
+            const bounds = validMarkers.map(
+                (m) => [m.latitude, m.longitude] as [number, number]
+            );
+            map.fitBounds(bounds, { padding: [40, 40], maxZoom: 18 });
+        }
+    }, [map, markers]);
+
+    return null;
+}
 
 export default function SaisieRecolement() {
     // --- ÉTATS GLOBAUX & REQUIS ---
@@ -44,6 +75,9 @@ export default function SaisieRecolement() {
     const [isDraggingFlag, setIsDraggingFlag] = useState<boolean>(false);
     const situationImageRef = useRef<HTMLDivElement>(null);
     const [isFlagEditModalOpen, setIsFlagEditModalOpen] = useState<boolean>(false);
+
+    // --- ÉTATS UI: AGRANDISSEMENT PHOTOS ---
+const [enlargedPhotoUrl, setEnlargedPhotoUrl] = useState<string | null>(null);
 
     const handlePointerDown = useCallback((e: React.PointerEvent) => {
         e.preventDefault();
@@ -75,12 +109,24 @@ export default function SaisieRecolement() {
     const [filterRue, setFilterRue] = useState<string>('');
     const [filterNonTrouvee, setFilterNonTrouvee] = useState<string>('');
 
-    const [activeTab, setActiveTab] = useState<'saisie' | 'historique'>('saisie');
+    // Mise à jour de l'état activeTab
+    const [activeTab, setActiveTab] = useState<'saisie' | 'historique' | 'carte'>('saisie');
     const [historique, setHistorique] = useState<any[]>([]);
     const [isLoadingHist, setIsLoadingHist] = useState(false);
     const [editId, setEditId] = useState<string | number | null>(null);
     const [exportingId, setExportingId] = useState<string | number | null>(null);
     const [pendingCount, setPendingCount] = useState<number>(0);
+
+// --- ÉTATS CARTE PLEIN ÉCRAN ---
+    const [mapRecords, setMapRecords] = useState<any[]>([]);
+    const [isLoadingMap, setIsLoadingMap] = useState<boolean>(false);
+    const [mapFilterStatus, setMapFilterStatus] = useState<string>('tous');
+
+    const filteredMapRecords = mapRecords.filter((record) => {
+        if (mapFilterStatus === 'trouve') return !record.non_trouvee;
+        if (mapFilterStatus === 'non_trouve') return Boolean(record.non_trouvee);
+        return true;
+    });
 
     // --- ÉTATS EXPORT IN-LINE ---
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -135,10 +181,10 @@ export default function SaisieRecolement() {
             date_recolement: new Date().toISOString().split('T')[0],
             non_trouvee: false,
             reperes: [],
-            actions_preconisees: [], // Ajouté
-            action_precision: '',     // Ajouté
-            materiau_conduit: '',     // Ajouté 
-            etat_cadre: ''            // Ajouté
+            actions_preconisees: [],
+            action_precision: '',
+            materiau_conduit: '',
+            etat_cadre: ''
         }
     });
 
@@ -160,7 +206,6 @@ export default function SaisieRecolement() {
     useEffect(() => {
         const actions: string[] = [];
 
-        // 1. Contrôles Tampon, Cadre & Arase
         if (etatCouvercle === 'Cassé à remplacer' || etatCouvercle === 'Manquant' || etatCouvercle === 'Fissuré / Ébréché') {
             actions.push("Remplacement du tampon");
         } else if (etatCouvercle === 'Verrouillé / Grippé') {
@@ -175,12 +220,10 @@ export default function SaisieRecolement() {
             actions.push("Remise à niveau de l'arase");
         }
 
-        // 2. Contrôle Accessibilité
         if (accessibiliteSite === 'Visibilité masquée (végétation/terre)' || accessibiliteSite === 'Enfouie sous enrobé') {
             actions.push("Dégagement d'accès");
         }
 
-        // 3. Contrôles Réseau & Conduits
         if (ecoulement === 'Engorgement / Obstrué') {
             actions.push("Curage / Nettoyage");
             actions.push("Débouchage / Dégorgement");
@@ -194,7 +237,6 @@ export default function SaisieRecolement() {
             }
         }
 
-        // 4. Contrôle des parois / raccordements
         if (etatParois === 'Déboîtement' || etatParois === 'Fracture') {
             actions.push("Reprise de raccordement");
         } else if (etatParois === 'Corrosion') {
@@ -207,16 +249,13 @@ export default function SaisieRecolement() {
             actions.push("Traitement des infiltrations");
         }
 
-        // Contrôle des eaux parasites
         if (eauxParasites && eauxParasites !== 'Aucune infiltration') {
             if (!actions.includes("Traitement des infiltrations")) {
                 actions.push("Traitement des infiltrations");
             }
         }
 
-        // 5. Gestion stricte du R.A.S.
         const hasAnomaly = actions.length > 0;
-
         if (!hasAnomaly) {
             actions.push("R.A.S.");
         }
@@ -248,8 +287,7 @@ export default function SaisieRecolement() {
         const { data, error } = await supabase
             .from('recolements_boites')
             .select('*')
-            .order('created_at', { ascending: false })
-            .limit(50);
+            .order('created_at', { ascending: false });
 
         if (!error && data) {
             setHistorique(data);
@@ -263,7 +301,34 @@ export default function SaisieRecolement() {
         }
     }, [activeTab, isOnline, fetchHistorique]);
 
-    // Formatage dynamique des dimensions en fonction de la forme
+    // Récupération des données géolocalisées pour la carte globale
+    const fetchMapRecords = useCallback(async () => {
+        setIsLoadingMap(true);
+        try {
+            const { data, error } = await supabase
+                .from('recolements_boites')
+                .select('*')
+                .not('latitude', 'is', null)
+                .not('longitude', 'is', null);
+
+            if (!error && data) {
+                setMapRecords(data);
+            } else if (error) {
+                console.error("Erreur chargement carte Supabase :", error);
+            }
+        } catch (err) {
+            console.error("Erreur inattendue carte :", err);
+        } finally {
+            setIsLoadingMap(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (activeTab === 'carte' && isOnline) {
+            fetchMapRecords();
+        }
+    }, [activeTab, isOnline, fetchMapRecords]);
+
     useEffect(() => {
         const currentDim = getValues('dimensions') || '';
         if (formeSelectionnee === 'Circulaire') {
@@ -474,16 +539,39 @@ export default function SaisieRecolement() {
     const resetSaisie = useCallback(() => {
         setEditId(null);
         const currentTech = getValues('technicien');
+
         reset({
+            id_ouvrage: '',
             technicien: currentTech,
             date_recolement: new Date().toISOString().split('T')[0],
             non_trouvee: false,
-            reperes: [],
-            actions_preconisees: [], // Ajouté
-            action_precision: '',     // Ajouté
-            materiau_conduit: '',     // Ajouté
-            etat_cadre: ''            // Ajouté
+            commune: '',
+            voie_numero: '',
+            voie_nom: '',
+            section_cadastrale: '',
+            parcelle_cadastrale: '',
+            domaine_assise: '',
+            accessibilite_site: '',
+            observations_localisation: '',
+            type_couvercle: '',
+            etat_couvercle: '',
+            forme: '',
+            dimensions: '',
+            affleurement: '',
+            materiau: '',
+            etat_cadre: '',
+            materiau_conduit: '',
+            profondeur_cm: undefined,
+            ecoulement: '',
+            etat_parois: '',
+            depots: '',
+            eaux_parasites: '',
+            observations_physiques: '',
+            actions_preconisees: [],
+            action_precision: '',
+            reperes: []
         });
+
         setReperesList([]);
         setActiveCoords(null);
         setShowSituationFlag(true);
@@ -491,6 +579,9 @@ export default function SaisieRecolement() {
         setFlagSize(40);
         setPhotoPreviews({ photo_situation: null, photo_couvercle: null, photos_interieur: [] });
         setPhotoFiles({ photo_situation: null, photo_couvercle: null, photos_interieur: [] });
+
+        lastFetchedCoords.current = null;
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     }, [getValues, reset]);
 
     const executeDelete = async (record: any) => {
@@ -505,11 +596,9 @@ export default function SaisieRecolement() {
             const searchColumn = (typeof record.id === 'number' || (typeof record.id === 'string' && /^[0-9a-fA-F-]{36}$/.test(record.id))) ? 'id' : 'id_ouvrage';
             const idValue = record[searchColumn];
 
-            // 1. Suppression Supabase
             const { error } = await supabase.from('recolements_boites').delete().eq(searchColumn, idValue);
             if (error) throw new Error(`Erreur Supabase: ${error.message}`);
 
-            // 2. Nettoyage des photos sur Cloudinary
             const urlsToDelete = [
                 record.photo_situation_url,
                 record.photo_couvercle_url,
@@ -525,7 +614,6 @@ export default function SaisieRecolement() {
                 if (success === false) cloudinaryFailures++;
             }
 
-            // 3. Mise à jour de l'UI
             setHistorique(prev => prev.filter(r => r[searchColumn] !== idValue));
             setRecordToDelete(null);
 
@@ -544,7 +632,7 @@ export default function SaisieRecolement() {
     const getFieldBg = useCallback((fieldName: keyof RecoletBoite) => {
         const val = formValues[fieldName];
         const isEmpty = val === undefined || val === null || val === "" || (Array.isArray(val) && val.length === 0);
-        return isEmpty ? "bg-amber-50/80 border-amber-200" : "bg-white border-gray-300";
+        return isEmpty ? "bg-yellow-100 border-yellow-400" : "bg-white border-gray-300";
     }, [formValues]);
 
     const handlePhotoCapture = async (photoType: 'photo_situation' | 'photo_couvercle' | 'photos_interieur', e: React.ChangeEvent<HTMLInputElement>) => {
@@ -592,14 +680,12 @@ export default function SaisieRecolement() {
         setIsRepereModalOpen(true);
     };
 
-
     const handleAddRepere = () => {
         if (!currentRepere.point || !currentRepere.description) {
             alert("Veuillez renseigner au moins le point de repère et la description.");
             return;
         }
 
-        // 1. Contrôle de la bonne saisie de la distance en numérique (en cm)
         const numericDistance = Number(currentRepere.distance);
         if (currentRepere.distance === '' || isNaN(numericDistance) || numericDistance < 0) {
             alert("Veuillez saisir une distance valide en centimètres (valeur numérique positive).");
@@ -612,86 +698,82 @@ export default function SaisieRecolement() {
             return;
         }
 
-        // 2. Enregistrement avec la distance convertie en nombre (garantit l'intégrité pour Supabase)
         const updatedList = [...reperesList, { ...currentRepere, distance: numericDistance }];
         setReperesList(updatedList);
         setValue('reperes', updatedList);
         setIsRepereModalOpen(false);
     };
+
     const handleRemoveRepere = (index: number) => {
         const updatedList = reperesList.filter((_, i) => i !== index);
         setReperesList(updatedList);
         setValue('reperes', updatedList);
     };
 
-const initialTextRef = useRef<string>("");
+    const initialTextRef = useRef<string>("");
 
-const toggleDictation = useCallback((field: string, isModal: boolean = false) => {
-    const trackingKey = isModal ? `modal_${field}` : field;
-    if (listeningField === trackingKey && recognitionRef.current) {
-        recognitionRef.current.stop();
-        return;
-    }
-    if (recognitionRef.current) recognitionRef.current.stop();
+    const toggleDictation = useCallback((field: string, isModal: boolean = false) => {
+        const trackingKey = isModal ? `modal_${field}` : field;
+        if (listeningField === trackingKey && recognitionRef.current) {
+            recognitionRef.current.stop();
+            return;
+        }
+        if (recognitionRef.current) recognitionRef.current.stop();
 
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-        alert("La dictée vocale n'est pas supportée nativement sur ce navigateur.");
-        return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'fr-FR';
-    // 1. ✅ Désactivation des résultats intermédiaires pour éviter les doublons IME sur mobile
-    recognition.interimResults = false;
-    recognition.continuous = true;
-    recognition.maxAlternatives = 1;
-    recognitionRef.current = recognition;
-
-    // 2. ✅ Capture de la valeur initiale du champ au déclenchement de l'écoute
-    const baseText = isModal
-        ? (currentRepere[field as keyof typeof currentRepere] || "")
-        : (getValues(field as keyof RecoletBoite) || "");
-    initialTextRef.current = String(baseText);
-
-    recognition.onstart = () => {
-        setListeningField(trackingKey);
-    };
-
-    recognition.onresult = (event: any) => {
-        let addedTranscript = "";
-
-        // 3. ✅ Utilisation de event.resultIndex (propriété native API, ignore les faux départs)
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-            if (event.results[i].isFinal) {
-                addedTranscript += " " + event.results[i][0].transcript;
-            }
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            alert("La dictée vocale n'est pas supportée nativement sur ce navigateur.");
+            return;
         }
 
-        if (addedTranscript.trim()) {
-            // 4. ✅ Mise à jour sur la base de la référence stable sans relire le state/form
-            initialTextRef.current = (initialTextRef.current + " " + addedTranscript.trim()).trim();
-            const nextValue = initialTextRef.current;
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'fr-FR';
+        recognition.interimResults = false;
+        recognition.continuous = true;
+        recognition.maxAlternatives = 1;
+        recognitionRef.current = recognition;
 
-            if (isModal) {
-                setCurrentRepere(prev => ({
-                    ...prev,
-                    [field]: nextValue
-                }));
-            } else {
-                setValue(field as keyof RecoletBoite, nextValue as any);
+        const baseText = isModal
+            ? (currentRepere[field as keyof typeof currentRepere] || "")
+            : (getValues(field as keyof RecoletBoite) || "");
+        initialTextRef.current = String(baseText);
+
+        recognition.onstart = () => {
+            setListeningField(trackingKey);
+        };
+
+        recognition.onresult = (event: any) => {
+            let addedTranscript = "";
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    addedTranscript += " " + event.results[i][0].transcript;
+                }
             }
-        }
-    };
 
-    recognition.onerror = () => { setListeningField(null); recognitionRef.current = null; };
-    recognition.onend = () => { setListeningField(null); recognitionRef.current = null; };
-    recognition.start();
-}, [listeningField, getValues, setValue]);
+            if (addedTranscript.trim()) {
+                initialTextRef.current = (initialTextRef.current + " " + addedTranscript.trim()).trim();
+                const nextValue = initialTextRef.current;
+
+                if (isModal) {
+                    setCurrentRepere(prev => ({
+                        ...prev,
+                        [field]: nextValue
+                    }));
+                } else {
+                    setValue(field as keyof RecoletBoite, nextValue as any);
+                }
+            }
+        };
+
+        recognition.onerror = () => { setListeningField(null); recognitionRef.current = null; };
+        recognition.onend = () => { setListeningField(null); recognitionRef.current = null; };
+        recognition.start();
+    }, [listeningField, getValues, setValue]);
 
     const fetchAddressAndCadastre = useCallback(async (lat: number, lon: number) => {
         try {
             setActiveCoords({ lat, lon });
+            lastFetchedCoords.current = { lat, lon };
 
             if (!isOnline) {
                 const pt = turf.point([lon, lat]);
@@ -758,6 +840,13 @@ const toggleDictation = useCallback((field: string, isModal: boolean = false) =>
             console.error("❌ Erreur de récupération adresse/cadastre :", error);
         }
     }, [editId, isOnline, setValue]);
+
+    const handleCaptureLocation = useCallback(() => {
+        requestLocation();
+        if (location.latitude != null && location.longitude != null) {
+            fetchAddressAndCadastre(location.latitude, location.longitude);
+        }
+    }, [location.latitude, location.longitude, requestLocation, fetchAddressAndCadastre]);
 
     useEffect(() => {
         if (!editId && location.latitude != null && location.longitude != null) {
@@ -895,14 +984,124 @@ const toggleDictation = useCallback((field: string, isModal: boolean = false) =>
 
             <h1 className="text-2xl font-bold mb-4 text-gray-800">Fiche de Récolement</h1>
 
-            <div className="flex bg-white rounded-xl shadow-sm border border-gray-200 p-1 mb-6">
-                <button type="button" onClick={() => { setActiveTab('saisie'); if (!editId) resetSaisie(); }} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'saisie' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
-                    {editId ? '✏️ Mode Modification' : '📝 Nouvelle Saisie'}
+            {/* BARRE DE NAVIGATION : 3 ONGLETS */}
+            <div className="flex bg-white rounded-xl shadow-sm border border-gray-200 p-1 mb-6 gap-1">
+                <button type="button" onClick={() => { setActiveTab('saisie'); if (!editId) resetSaisie(); }} className={`flex-1 py-2 px-1 text-xs sm:text-sm font-bold rounded-lg transition-colors ${activeTab === 'saisie' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+                    {editId ? '✏️ Mode Modif' : '📝 Saisie'}
                 </button>
-                <button type="button" onClick={() => { setActiveTab('historique'); resetSaisie(); }} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'historique' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
-                    🗂️ Historique & Modif
+                <button type="button" onClick={() => { setActiveTab('historique'); resetSaisie(); }} className={`flex-1 py-2 px-1 text-xs sm:text-sm font-bold rounded-lg transition-colors ${activeTab === 'historique' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+                    🗂️ Historique
+                </button>
+                <button type="button" onClick={() => { setActiveTab('carte'); }} className={`flex-1 py-2 px-1 text-xs sm:text-sm font-bold rounded-lg transition-colors ${activeTab === 'carte' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+                    🗺️ Carte Plein Écran
                 </button>
             </div>
+
+{/* ONGLET 3 : CARTE PLEIN ÉCRAN */}
+            {activeTab === 'carte' && (
+                <div className="bg-white p-2 sm:p-4 rounded-xl shadow-md border border-gray-200 space-y-3">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 px-1">
+                        <h2 className="text-base sm:text-lg font-bold text-gray-800 flex items-center gap-2">
+                            <span>🗺️</span> Carte globale des récolements
+                        </h2>
+                        <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+                            <select
+                                value={mapFilterStatus}
+                                onChange={(e) => setMapFilterStatus(e.target.value)}
+                                className="text-xs sm:text-sm p-2 border border-gray-300 rounded-lg bg-white font-medium focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
+                            >
+                                <option value="tous">Tous les points</option>
+                                <option value="trouve">Trouvés uniquement</option>
+                                <option value="non_trouve">Non trouvés uniquement</option>
+                            </select>
+                            <span className="text-xs font-semibold text-blue-800 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200 whitespace-nowrap">
+                                {filteredMapRecords.length} point(s)
+                            </span>
+                        </div>
+                    </div>
+
+                    {isLoadingMap ? (
+                        <div className="h-[calc(100vh-230px)] min-h-[380px] w-full flex flex-col items-center justify-center bg-gray-50 rounded-xl border border-gray-200">
+                            <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-3"></div>
+                            <p className="text-gray-600 font-medium text-sm">Chargement de la carte et des points...</p>
+                        </div>
+                    ) : !isOnline ? (
+                        <div className="h-[calc(100vh-230px)] min-h-[380px] w-full flex flex-col items-center justify-center bg-red-50 rounded-xl border border-red-200 p-4 text-center">
+                            <span className="text-3xl mb-2">📡</span>
+                            <p className="text-red-700 font-bold mb-1">Connexion Internet requise</p>
+                            <p className="text-red-600 text-xs sm:text-sm">La carte globale nécessite une connexion réseau pour charger le fond de carte satellite et les données distantes.</p>
+                        </div>
+                    ) : (
+                        <div className="h-[calc(100vh-230px)] min-h-[380px] w-full rounded-xl overflow-hidden border border-gray-300 shadow-inner relative z-0">
+                            <MapContainer
+                                center={[49.27, 0.96]}
+                                zoom={12}
+                                style={{ height: '100%', width: '100%' }}
+                            >
+                                <ZoomIndicator />
+                                <OfflineMapManager />
+                                <LayersControl position="topright">
+                                    <LayersControl.BaseLayer checked name="Satellite (IGN)">
+                                        <TileLayer
+                                            url="https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}"
+                                            maxZoom={19}
+                                        />
+                                    </LayersControl.BaseLayer>
+                                    <LayersControl.Overlay checked name="Cadastre (IGN)">
+                                        <WMSTileLayer
+                                            url="https://wxs.ign.fr/essentiels/geoportail/wms?"
+                                            layers="CADASTRALPARCELS.PARCELS"
+                                            format="image/png"
+                                            transparent={true}
+                                            version="1.3.0"
+                                        />
+                                    </LayersControl.Overlay>
+                                </LayersControl>
+
+                                {filteredMapRecords.length > 0 && <MapFitBounds markers={filteredMapRecords} />}
+
+                                {filteredMapRecords.map((record) => (
+                                    <Marker
+                                        key={record.id || record.id_ouvrage}
+                                        position={[record.latitude, record.longitude]}
+                                        {...(record.non_trouvee ? { icon: redIcon } : {})}
+                                    >
+                                        <Popup>
+                                            <div className="p-1 space-y-2 min-w-[180px]">
+                                                <div className="font-bold text-blue-900 border-b pb-1 text-sm">
+                                                    {record.id_ouvrage}
+                                                </div>
+                                                <div className="text-xs text-gray-700 space-y-1">
+                                                    <div className="flex items-start gap-1">
+                                                        <span>📍</span>
+                                                        <div className="font-medium">
+                                                            {(record.voie_numero || record.voie_nom) && (
+                                                                <div>{[record.voie_numero, record.voie_nom].filter(Boolean).join(' ')}</div>
+                                                            )}
+                                                            {(record.code_postal || record.commune) && (
+                                                                <div>{[record.code_postal, record.commune].filter(Boolean).join(' ')}</div>
+                                                            )}
+                                                            {!record.voie_nom && !record.commune && <div>Adresse N.R.</div>}
+                                                        </div>
+                                                    </div>
+                                                    <p>📅 {record.date_recolement ? new Date(record.date_recolement).toLocaleDateString('fr-FR') : 'Date N.R.'}</p>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleEditRecord(record)}
+                                                    className="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-1.5 px-3 rounded text-xs transition-colors shadow flex items-center justify-center gap-1 cursor-pointer"
+                                                >
+                                                    ✏️ Modifier
+                                                </button>
+                                            </div>
+                                        </Popup>
+                                    </Marker>
+                                ))}
+                            </MapContainer>
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* ONGLET HISTORIQUE */}
             {activeTab === 'historique' && (
@@ -939,7 +1138,7 @@ const toggleDictation = useCallback((field: string, isModal: boolean = false) =>
                 >
                     {editId && (
                         <div className="bg-amber-100 border border-amber-300 text-amber-800 p-3 rounded-xl flex justify-between items-center shadow-sm">
-                            <div className="font-medium">✏️ Vous modifiez l'ouvrage : <span className="font-bold">{getValues('id_ouvrage')}</span></div>
+                            <div className="font-medium text-sm sm:text-base">✏️ Vous modifiez l'ouvrage : <span className="font-bold">{getValues('id_ouvrage')}</span></div>
                             <button type="button" onClick={resetSaisie} className="text-amber-800 text-sm font-bold bg-amber-200 px-3 py-1 rounded hover:bg-amber-300">Annuler</button>
                         </div>
                     )}
@@ -978,7 +1177,7 @@ const toggleDictation = useCallback((field: string, isModal: boolean = false) =>
                             <div className="p-4 bg-blue-50 rounded-lg border border-blue-100 space-y-4">
                                 <div className="flex justify-between items-center">
                                     <div><span className="font-medium text-gray-800">Positionnement cartographique</span></div>
-                                    <button type="button" onClick={requestLocation} disabled={location.loading} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium shadow-sm active:bg-blue-700">
+                                    <button type="button" onClick={handleCaptureLocation} disabled={location.loading} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium shadow-sm active:bg-blue-700">
                                         {location.loading ? 'Recherche...' : '📍 Capturer position'}
                                     </button>
                                 </div>
@@ -1107,7 +1306,7 @@ const toggleDictation = useCallback((field: string, isModal: boolean = false) =>
                             <section className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
                                 <h2 className="text-xl font-bold mb-4 text-blue-800 border-b pb-2">2 - Tampon</h2>
                                 <div className="space-y-4">
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Type de couvercle</label>
                                             <select {...register("type_couvercle")} className={`w-full p-3 border rounded-lg text-lg transition-colors ${getFieldBg('type_couvercle')}`}>
@@ -1118,6 +1317,7 @@ const toggleDictation = useCallback((field: string, isModal: boolean = false) =>
                                                 <option value="Grille">Grille</option>
                                             </select>
                                         </div>
+
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">État du tampon</label>
                                             <select {...register("etat_couvercle")} className={`w-full p-3 border rounded-lg text-lg transition-colors ${getFieldBg('etat_couvercle')}`}>
@@ -1129,7 +1329,28 @@ const toggleDictation = useCallback((field: string, isModal: boolean = false) =>
                                                 <option value="Manquant">Manquant</option>
                                             </select>
                                         </div>
+
                                         <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Forme de l'ouvrage / tampon</label>
+                                            <select {...register("forme")} className={`w-full p-3 border rounded-lg text-lg transition-colors ${getFieldBg('forme')}`}>
+                                                <option value="">Sélectionner...</option>
+                                                <option value="Circulaire">Circulaire</option>
+                                                <option value="Carrée">Carrée</option>
+                                                <option value="Rectangulaire">Rectangulaire</option>
+                                                <option value="Trapézoïdale / Spéciale">Trapézoïdale / Spéciale</option>
+                                            </select>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Dimensions / Diamètre</label>
+                                            <input
+                                                {...register("dimensions")}
+                                                className={`w-full p-3 border rounded-lg text-lg transition-colors ${getFieldBg('dimensions')}`}
+                                                placeholder={formeSelectionnee === 'Circulaire' ? "Ex: Ø 600" : "Ex: 80 x 80"}
+                                            />
+                                        </div>
+
+                                        <div className="md:col-span-2">
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Niveau d'affleurement</label>
                                             <select {...register("affleurement")} className={`w-full p-3 border rounded-lg text-lg transition-colors ${getFieldBg('affleurement')}`}>
                                                 <option value="">Sélectionner...</option>
@@ -1141,16 +1362,18 @@ const toggleDictation = useCallback((field: string, isModal: boolean = false) =>
                                             </select>
                                         </div>
                                     </div>
+
                                     <div className="pt-3 border-t border-gray-200">
                                         <label className="block text-sm font-bold text-gray-800 mb-2">📸 Photo Couvercle / Tampon</label>
                                         {photoPreviews.photo_couvercle ? (
-                                            <div className="relative inline-block bg-gray-100 p-1 rounded-lg border shadow-sm">
-                                                <img src={photoPreviews.photo_couvercle} alt="Couvercle" className="h-32 w-32 object-cover rounded" />
-                                                <button type="button" onClick={() => handleRemovePhoto('photo_couvercle')} className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-7 h-7 flex items-center justify-center font-bold">✕</button>
-                                            </div>
+<div onClick={() => setEnlargedPhotoUrl(photoPreviews.photo_couvercle)} className="relative inline-block bg-gray-100 p-1 rounded-lg border shadow-sm cursor-pointer hover:ring-4 hover:ring-blue-300 transition-all">
+    <img src={photoPreviews.photo_couvercle} alt="Couvercle" className="h-32 w-32 object-cover rounded block" />
+    <button type="button" onClick={(e) => { e.stopPropagation(); handleRemovePhoto('photo_couvercle'); }} className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-7 h-7 flex items-center justify-center font-bold shadow z-30">✕</button>
+</div>
                                         ) : (
                                             <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
-                                                <span className="text-2xl mb-1">📷</span><span className="text-sm font-medium text-blue-700">Importer Photo</span>
+                                                <span className="text-2xl mb-1">📷</span>
+                                                <span className="text-sm font-medium text-blue-700">Importer Photo</span>
                                                 <input type="file" accept="image/*" capture="environment" onChange={(e) => handlePhotoCapture('photo_couvercle', e)} className="hidden" />
                                             </label>
                                         )}
@@ -1162,7 +1385,6 @@ const toggleDictation = useCallback((field: string, isModal: boolean = false) =>
                                 <h2 className="text-xl font-bold mb-1 text-blue-800 border-b pb-2">3 - Cadre</h2>
                                 <div className="space-y-4">
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Matériau</label>
                                             <select {...register("materiau")} className={`w-full p-3 border rounded-lg text-lg transition-colors ${getFieldBg('materiau')}`}>
@@ -1182,18 +1404,26 @@ const toggleDictation = useCallback((field: string, isModal: boolean = false) =>
                                                 <option value="Cassé">Cassé</option>
                                             </select>
                                         </div>
-
                                     </div>
                                 </div>
                             </section>
 
-                            <section className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                                <h2 className="text-xl font-bold mb-4 text-blue-800 border-b pb-2">4 - Conduits</h2>
-                                <div className="space-y-4">
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <section className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 space-y-6">
+                                <div className="border-b pb-3">
+                                    <h2 className="text-xl font-bold text-blue-800">4 - Conduits</h2>
+                                    <p className="text-sm text-gray-500 mt-0.5">Caractéristiques techniques et état du tronçon</p>
+                                </div>
+
+                                <div className="bg-slate-50/60 p-4 rounded-xl border border-slate-100 space-y-4">
+                                    <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Caractéristiques & Diagnostic</h3>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">Matériau du conduit</label>
-                                            <select {...register("materiau_conduit")} className={`w-full p-3 border rounded-lg text-lg outline-none transition-colors ${getFieldBg('materiau_conduit')}`}>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Matériau du conduit</label>
+                                            <select
+                                                {...register("materiau_conduit")}
+                                                className={`w-full p-3 border rounded-lg text-base outline-none transition-colors bg-white ${getFieldBg('materiau_conduit')}`}
+                                            >
                                                 <option value="">Sélectionner...</option>
                                                 <option value="PVC">PVC</option>
                                                 <option value="Béton">Béton</option>
@@ -1202,13 +1432,23 @@ const toggleDictation = useCallback((field: string, isModal: boolean = false) =>
                                                 <option value="Maçonné">Maçonné</option>
                                             </select>
                                         </div>
+
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">Profondeur au radier (cm)</label>
-                                            <input type="number" {...register("profondeur_cm", { valueAsNumber: true })} className={`w-full p-3 border rounded-lg text-lg transition-colors ${getFieldBg('profondeur_cm')}`} />
+                                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Profondeur au radier (cm)</label>
+                                            <input
+                                                type="number"
+                                                {...register("profondeur_cm", { valueAsNumber: true })}
+                                                className={`w-full p-3 border rounded-lg text-base transition-colors bg-white ${getFieldBg('profondeur_cm')}`}
+                                                placeholder="Ex: 120"
+                                            />
                                         </div>
+
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">Écoulement et fils d'eau</label>
-                                            <select {...register("ecoulement")} className={`w-full p-3 border rounded-lg text-lg outline-none transition-colors ${getFieldBg('ecoulement')}`}>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Écoulement et fils d'eau</label>
+                                            <select
+                                                {...register("ecoulement")}
+                                                className={`w-full p-3 border rounded-lg text-lg outline-none transition-colors bg-white ${getFieldBg('ecoulement')}`}
+                                            >
                                                 <option value="">Sélectionner...</option>
                                                 <option value="Fluide et normal">Fluide et normal</option>
                                                 <option value="Stagnation légère">Stagnation légère</option>
@@ -1216,25 +1456,29 @@ const toggleDictation = useCallback((field: string, isModal: boolean = false) =>
                                                 <option value="Refoulement constaté">Refoulement constaté</option>
                                             </select>
                                         </div>
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
                                         <div>
-                                            <div>
-                                                <label className="block text-sm font-medium text-gray-700 mb-1">État des raccordements</label>
-                                                <select {...register("etat_parois")} className={`w-full p-3 border rounded-lg text-lg outline-none transition-colors ${getFieldBg('etat_parois')}`}>
-                                                    <option value="">Sélectionner...</option>
-                                                    <option value="Bon état étanche">Bon état étanche</option>
-                                                    <option value="Déboîtement">Déboîtement</option>
-                                                    <option value="Corrosion">Corrosion</option>
-                                                    <option value="Fracture">Fracture</option>
-                                                    <option value="Fissures">Fissures</option>
-                                                    <option value="Racines">Racines</option>
-                                                </select>
-                                            </div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1.5">État des raccordements</label>
+                                            <select
+                                                {...register("etat_parois")}
+                                                className={`w-full p-3 border rounded-lg text-lg outline-none transition-colors bg-white ${getFieldBg('etat_parois')}`}
+                                            >
+                                                <option value="">Sélectionner...</option>
+                                                <option value="Bon état étanche">Bon état étanche</option>
+                                                <option value="Déboîtement">Déboîtement</option>
+                                                <option value="Corrosion">Corrosion</option>
+                                                <option value="Fracture">Fracture</option>
+                                                <option value="Fissures">Fissures</option>
+                                                <option value="Racines">Racines</option>
+                                            </select>
                                         </div>
+
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">Dépôts</label>
-                                            <select {...register("depots")} className={`w-full p-3 border rounded-lg text-lg outline-none transition-colors ${getFieldBg('depots')}`}>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Dépôts constatés</label>
+                                            <select
+                                                {...register("depots")}
+                                                className={`w-full p-3 border rounded-lg text-lg outline-none transition-colors bg-white ${getFieldBg('depots')}`}
+                                            >
                                                 <option value="">Sélectionner...</option>
                                                 <option value="Aucun dépôt">Aucun dépôt</option>
                                                 <option value="Graisses">Graisses</option>
@@ -1243,9 +1487,13 @@ const toggleDictation = useCallback((field: string, isModal: boolean = false) =>
                                                 <option value="Tartre / Calcaire">Tartre / Calcaire</option>
                                             </select>
                                         </div>
+
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">Eaux parasites</label>
-                                            <select {...register("eaux_parasites")} className={`w-full p-3 border rounded-lg text-lg outline-none transition-colors ${getFieldBg('eaux_parasites')}`}>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Eaux parasites</label>
+                                            <select
+                                                {...register("eaux_parasites")}
+                                                className={`w-full p-3 border rounded-lg text-lg outline-none transition-colors bg-white ${getFieldBg('eaux_parasites')}`}
+                                            >
                                                 <option value="">Sélectionner...</option>
                                                 <option value="Aucune infiltration">Aucune infiltration</option>
                                                 <option value="Infiltration eau claire (nappe)">Infiltration eau claire (nappe)</option>
@@ -1253,87 +1501,117 @@ const toggleDictation = useCallback((field: string, isModal: boolean = false) =>
                                             </select>
                                         </div>
                                     </div>
+                                </div>
 
-                                    <div>
-                                        <div className="flex justify-between items-center mb-1">
-                                            <label className="block text-sm font-medium text-gray-700">Matériaux et dimensions (Observations physiques)</label>
-                                            <button type="button" onClick={() => toggleDictation('observations_physiques')} className={`text-sm px-3 py-1 rounded border ${listeningField === 'observations_physiques' ? 'bg-red-600 text-white animate-pulse' : 'bg-white'}`}>🎤 Dicter</button>
-                                        </div>
-                                        <textarea {...register("observations_physiques")} rows={3} className={`w-full p-3 border rounded-lg text-lg outline-none transition-colors ${getFieldBg('observations_physiques')}`} />
+                                <div className="space-y-2">
+                                    <div className="flex justify-between items-center">
+                                        <label className="block text-sm font-semibold text-gray-700">
+                                            Observations physiques (Matériaux & dimensions)
+                                        </label>
+                                        <button
+                                            type="button"
+                                            onClick={() => toggleDictation('observations_physiques')}
+                                            className={`text-xs px-3 py-1.5 rounded-full border flex items-center gap-1.5 font-medium transition-all ${listeningField === 'observations_physiques'
+                                                ? 'bg-red-600 text-white border-red-600 animate-pulse shadow-sm'
+                                                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                                                }`}
+                                        >
+                                            <span>🎤</span> {listeningField === 'observations_physiques' ? 'Écoute en cours...' : 'Dicter'}
+                                        </button>
                                     </div>
+                                    <textarea
+                                        {...register("observations_physiques")}
+                                        rows={3}
+                                        className={`w-full p-3 border rounded-lg text-base outline-none transition-colors ${getFieldBg('observations_physiques')}`}
+                                        placeholder="Remarques particulières sur le conduit..."
+                                    />
+                                </div>
 
-                                    <div className="pt-3 border-t border-gray-200">
-                                        <label className="block text-sm font-bold text-gray-800 mb-2">📸 Photos Intérieur (Multiples)</label>
-                                        <div className="flex flex-wrap gap-3">
-                                            {photoPreviews.photos_interieur.map((preview, idx) => (
-                                                <div key={idx} className="relative inline-block bg-gray-100 p-1 rounded-lg border shadow-sm">
-                                                    <img src={preview} alt={`Intérieur ${idx + 1}`} className="h-32 w-32 object-cover rounded" />
-                                                    <button type="button" onClick={() => handleRemovePhoto('photos_interieur', idx)} className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-7 h-7 flex items-center justify-center font-bold shadow">✕</button>
-                                                </div>
-                                            ))}
-                                            <label className="flex flex-col items-center justify-center w-32 h-32 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
-                                                <span className="text-2xl mb-1">📷</span><span className="text-sm font-medium text-blue-700">Ajouter</span>
-                                                <input type="file" accept="image/*" multiple capture="environment" onChange={(e) => handlePhotoCapture('photos_interieur', e)} className="hidden" />
-                                            </label>
-                                        </div>
+                                <div className="pt-4 border-t border-gray-100">
+                                    <label className="block text-sm font-semibold text-gray-800 mb-3">
+                                        📸 Photos Intérieur
+                                    </label>
+                                    <div className="flex flex-wrap gap-4">
+                                        {photoPreviews.photos_interieur.map((preview, idx) => (
+<div key={idx} onClick={() => setEnlargedPhotoUrl(preview)} className="relative group bg-gray-100 p-1 rounded-xl border border-gray-200 shadow-sm cursor-pointer hover:ring-4 hover:ring-blue-300 transition-all">
+    <img src={preview} alt={`Intérieur ${idx + 1}`} className="h-28 w-28 object-cover rounded-lg block" />
+    <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); handleRemovePhoto('photos_interieur', idx); }}
+        className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shadow hover:bg-red-700 transition-colors z-30"
+    >
+        ✕
+    </button>
+</div>
+                                        ))}
+                                        <label className="flex flex-col items-center justify-center w-28 h-28 border-2 border-dashed border-blue-200 rounded-xl cursor-pointer bg-blue-50/50 hover:bg-blue-50 transition-colors">
+                                            <span className="text-xl mb-1">📷</span>
+                                            <span className="text-xs font-semibold text-blue-700">Ajouter</span>
+                                            <input
+                                                type="file"
+                                                accept="image/*"
+                                                multiple
+                                                capture="environment"
+                                                onChange={(e) => handlePhotoCapture('photos_interieur', e)}
+                                                className="hidden"
+                                            />
+                                        </label>
                                     </div>
+                                </div>
+                            </section>
 
-                                    <section className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                                        <h2 className="text-xl font-bold mb-4 text-blue-800 border-b pb-2">5 - Action(s) préconisée(s)</h2>
+                            <section className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                                <h2 className="text-xl font-bold mb-4 text-blue-800 border-b pb-2">5 - Action(s) préconisée(s)</h2>
+                                <div className="space-y-4">
+                                    <label className="block text-sm font-medium text-gray-700">Cocher les interventions à prévoir :</label>
 
-                                        <div className="space-y-4">
-                                            <label className="block text-sm font-medium text-gray-700">Cocher les interventions à prévoir :</label>
-
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                                {[
-                                                    "R.A.S.",
-                                                    "Curage / Nettoyage",
-                                                    "Débouchage / Dégorgement",
-                                                    "Remplacement du tampon",
-                                                    "Réparation du cadre",
-                                                    "Remise à niveau de l'arase",
-                                                    "Traitement des infiltrations",
-                                                    "Dégagement d'accès",
-                                                    "Reprise de raccordement",
-                                                    "Traitement anti-corrosion / Réfection",
-                                                    "Dégrippage / Déblocage"
-                                                ].map((action, idx) => (
-                                                    <label
-                                                        key={idx}
-                                                        className="flex items-center gap-3 p-3 border rounded-lg hover:bg-blue-50 cursor-pointer transition-colors bg-gray-50"
-                                                    >
-                                                        <input
-                                                            type="checkbox"
-                                                            value={action}
-                                                            {...register("actions_preconisees")}
-                                                            className="w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                                                        />
-                                                        <span className="text-gray-800 font-medium">{action}</span>
-                                                    </label>
-                                                ))}
-                                            </div>
-
-                                            <div className="pt-2">
-                                                <div className="flex justify-between items-center mb-1">
-                                                    <label className="block text-sm font-medium text-gray-700">Autre action / Précisions complémentaires</label>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => toggleDictation('action_precision')}
-                                                        className={`text-sm px-3 py-1 rounded border ${listeningField === 'action_precision' ? 'bg-red-600 text-white animate-pulse' : 'bg-white'}`}
-                                                    >
-                                                        🎤 Dicter
-                                                    </button>
-                                                </div>
-                                                <textarea
-                                                    {...register("action_precision")}
-                                                    rows={2}
-                                                    className={`w-full p-3 border rounded-lg text-lg outline-none transition-colors ${getFieldBg('action_precision')}`}
-                                                    placeholder="Préciser les détails si nécessaire..."
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        {[
+                                            "R.A.S.",
+                                            "Curage / Nettoyage",
+                                            "Débouchage / Dégorgement",
+                                            "Remplacement du tampon",
+                                            "Réparation du cadre",
+                                            "Remise à niveau de l'arase",
+                                            "Traitement des infiltrations",
+                                            "Dégagement d'accès",
+                                            "Reprise de raccordement",
+                                            "Traitement anti-corrosion / Réfection",
+                                            "Dégrippage / Déblocage"
+                                        ].map((action, idx) => (
+                                            <label
+                                                key={idx}
+                                                className="flex items-center gap-3 p-3 border rounded-lg hover:bg-blue-50 cursor-pointer transition-colors bg-gray-50"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    value={action}
+                                                    {...register("actions_preconisees")}
+                                                    className="w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                                                 />
-                                            </div>
-                                        </div>
-                                    </section>
+                                                <span className="text-gray-800 font-medium">{action}</span>
+                                            </label>
+                                        ))}
+                                    </div>
 
+                                    <div className="pt-2">
+                                        <div className="flex justify-between items-center mb-1">
+                                            <label className="block text-sm font-medium text-gray-700">Autre action / Précisions complémentaires</label>
+                                            <button
+                                                type="button"
+                                                onClick={() => toggleDictation('action_precision')}
+                                                className={`text-sm px-3 py-1 rounded border ${listeningField === 'action_precision' ? 'bg-red-600 text-white animate-pulse' : 'bg-white'}`}
+                                            >
+                                                🎤 Dicter
+                                            </button>
+                                        </div>
+                                        <textarea
+                                            {...register("action_precision")}
+                                            rows={2}
+                                            className={`w-full p-3 border rounded-lg text-lg outline-none transition-colors ${getFieldBg('action_precision')}`}
+                                            placeholder="Préciser les détails si nécessaire..."
+                                        />
+                                    </div>
                                 </div>
                             </section>
                         </>
@@ -1396,6 +1674,31 @@ const toggleDictation = useCallback((field: string, isModal: boolean = false) =>
                 onConfirm={executeDelete}
                 isDeleting={isDeleting}
             />
+
+{/* MODAL VISIONNEUSE PHOTOS (Couvercle / Intérieur) */}
+            {enlargedPhotoUrl && (
+                <div 
+                    className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4" 
+                    onClick={() => setEnlargedPhotoUrl(null)}
+                >
+                    <div className="relative max-w-full max-h-full flex items-center justify-center">
+                        <button 
+                            type="button" 
+                            onClick={(e) => { e.stopPropagation(); setEnlargedPhotoUrl(null); }} 
+                            className="absolute -top-4 -right-4 sm:-top-6 sm:-right-6 bg-red-600 text-white rounded-full w-10 h-10 flex items-center justify-center font-bold text-xl shadow-lg z-[70] hover:bg-red-700 transition-colors"
+                        >
+                            ✕
+                        </button>
+                        <img 
+                            src={enlargedPhotoUrl} 
+                            alt="Agrandissement" 
+                            className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl" 
+                            onClick={(e) => e.stopPropagation()} 
+                        />
+                    </div>
+                </div>
+            )}
+            
         </div>
     );
 }
