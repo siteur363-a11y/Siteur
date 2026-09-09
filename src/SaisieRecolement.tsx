@@ -77,7 +77,7 @@ export default function SaisieRecolement() {
     const [isFlagEditModalOpen, setIsFlagEditModalOpen] = useState<boolean>(false);
 
     // --- ÉTATS UI: AGRANDISSEMENT PHOTOS ---
-const [enlargedPhotoUrl, setEnlargedPhotoUrl] = useState<string | null>(null);
+    const [enlargedPhotoUrl, setEnlargedPhotoUrl] = useState<string | null>(null);
 
     const handlePointerDown = useCallback((e: React.PointerEvent) => {
         e.preventDefault();
@@ -117,7 +117,7 @@ const [enlargedPhotoUrl, setEnlargedPhotoUrl] = useState<string | null>(null);
     const [exportingId, setExportingId] = useState<string | number | null>(null);
     const [pendingCount, setPendingCount] = useState<number>(0);
 
-// --- ÉTATS CARTE PLEIN ÉCRAN ---
+    // --- ÉTATS CARTE PLEIN ÉCRAN ---
     const [mapRecords, setMapRecords] = useState<any[]>([]);
     const [isLoadingMap, setIsLoadingMap] = useState<boolean>(false);
     const [mapFilterStatus, setMapFilterStatus] = useState<string>('tous');
@@ -173,6 +173,32 @@ const [enlargedPhotoUrl, setEnlargedPhotoUrl] = useState<string | null>(null);
     }>({ photo_situation: null, photo_couvercle: null, photos_interieur: [] });
 
     const [isSubmitting, setIsSubmitting] = useState(false);
+
+    // --- NOUVEAU : ÉTAT POUR LES SUGGESTIONS DE DIMENSIONS ---
+    const [existingDimensions, setExistingDimensions] = useState<string[]>([]);
+
+    useEffect(() => {
+        const fetchDimensions = async () => {
+            if (!isOnline) return;
+            try {
+                const { data, error } = await supabase
+                    .from('recolements_boites')
+                    .select('dimensions')
+                    .not('dimensions', 'is', null);
+
+                if (!error && data) {
+                    const validDims = data
+                        .map(d => d.dimensions)
+                        .filter(dim => dim && dim.trim() !== '' && dim.trim() !== 'Ø' && dim.trim() !== 'X');
+                    const uniqueDims = Array.from(new Set(validDims)).sort();
+                    setExistingDimensions(uniqueDims as string[]);
+                }
+            } catch (err) {
+                console.error("Erreur récupération des dimensions :", err);
+            }
+        };
+        fetchDimensions();
+    }, [isOnline]);
 
     // Initialisation React Hook Form
     const { register, handleSubmit, formState: { errors }, watch, setValue, getValues, reset } = useForm<RecoletBoite>({
@@ -768,7 +794,7 @@ const [enlargedPhotoUrl, setEnlargedPhotoUrl] = useState<string | null>(null);
         recognition.onerror = () => { setListeningField(null); recognitionRef.current = null; };
         recognition.onend = () => { setListeningField(null); recognitionRef.current = null; };
         recognition.start();
-    }, [listeningField, getValues, setValue]);
+    }, [listeningField, getValues, setValue, currentRepere]);
 
     const fetchAddressAndCadastre = useCallback(async (lat: number, lon: number) => {
         try {
@@ -997,7 +1023,7 @@ const [enlargedPhotoUrl, setEnlargedPhotoUrl] = useState<string | null>(null);
                 </button>
             </div>
 
-{/* ONGLET 3 : CARTE PLEIN ÉCRAN */}
+            {/* ONGLET 3 : CARTE PLEIN ÉCRAN */}
             {activeTab === 'carte' && (
                 <div className="bg-white p-2 sm:p-4 rounded-xl shadow-md border border-gray-200 space-y-3">
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 px-1">
@@ -1337,7 +1363,7 @@ const [enlargedPhotoUrl, setEnlargedPhotoUrl] = useState<string | null>(null);
                                                 <option value="Circulaire">Circulaire</option>
                                                 <option value="Carrée">Carrée</option>
                                                 <option value="Rectangulaire">Rectangulaire</option>
-                                                <option value="Trapézoïdale / Spéciale">Trapézoïdale / Spéciale</option>
+                                                <option value="Spéciale">Spéciale</option>
                                             </select>
                                         </div>
 
@@ -1345,9 +1371,16 @@ const [enlargedPhotoUrl, setEnlargedPhotoUrl] = useState<string | null>(null);
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Dimensions / Diamètre</label>
                                             <input
                                                 {...register("dimensions")}
+                                                list="dimensions-suggestions"
+                                                autoComplete="off"
                                                 className={`w-full p-3 border rounded-lg text-lg transition-colors ${getFieldBg('dimensions')}`}
                                                 placeholder={formeSelectionnee === 'Circulaire' ? "Ex: Ø 600" : "Ex: 80 x 80"}
                                             />
+                                            <datalist id="dimensions-suggestions">
+                                                {existingDimensions.map((dim, idx) => (
+                                                    <option key={idx} value={dim} />
+                                                ))}
+                                            </datalist>
                                         </div>
 
                                         <div className="md:col-span-2">
@@ -1366,10 +1399,10 @@ const [enlargedPhotoUrl, setEnlargedPhotoUrl] = useState<string | null>(null);
                                     <div className="pt-3 border-t border-gray-200">
                                         <label className="block text-sm font-bold text-gray-800 mb-2">📸 Photo Couvercle / Tampon</label>
                                         {photoPreviews.photo_couvercle ? (
-<div onClick={() => setEnlargedPhotoUrl(photoPreviews.photo_couvercle)} className="relative inline-block bg-gray-100 p-1 rounded-lg border shadow-sm cursor-pointer hover:ring-4 hover:ring-blue-300 transition-all">
-    <img src={photoPreviews.photo_couvercle} alt="Couvercle" className="h-32 w-32 object-cover rounded block" />
-    <button type="button" onClick={(e) => { e.stopPropagation(); handleRemovePhoto('photo_couvercle'); }} className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-7 h-7 flex items-center justify-center font-bold shadow z-30">✕</button>
-</div>
+                                            <div onClick={() => setEnlargedPhotoUrl(photoPreviews.photo_couvercle)} className="relative inline-block bg-gray-100 p-1 rounded-lg border shadow-sm cursor-pointer hover:ring-4 hover:ring-blue-300 transition-all">
+                                                <img src={photoPreviews.photo_couvercle} alt="Couvercle" className="h-32 w-32 object-cover rounded block" />
+                                                <button type="button" onClick={(e) => { e.stopPropagation(); handleRemovePhoto('photo_couvercle'); }} className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-7 h-7 flex items-center justify-center font-bold shadow z-30">✕</button>
+                                            </div>
                                         ) : (
                                             <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
                                                 <span className="text-2xl mb-1">📷</span>
@@ -1533,16 +1566,16 @@ const [enlargedPhotoUrl, setEnlargedPhotoUrl] = useState<string | null>(null);
                                     </label>
                                     <div className="flex flex-wrap gap-4">
                                         {photoPreviews.photos_interieur.map((preview, idx) => (
-<div key={idx} onClick={() => setEnlargedPhotoUrl(preview)} className="relative group bg-gray-100 p-1 rounded-xl border border-gray-200 shadow-sm cursor-pointer hover:ring-4 hover:ring-blue-300 transition-all">
-    <img src={preview} alt={`Intérieur ${idx + 1}`} className="h-28 w-28 object-cover rounded-lg block" />
-    <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); handleRemovePhoto('photos_interieur', idx); }}
-        className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shadow hover:bg-red-700 transition-colors z-30"
-    >
-        ✕
-    </button>
-</div>
+                                            <div key={idx} onClick={() => setEnlargedPhotoUrl(preview)} className="relative group bg-gray-100 p-1 rounded-xl border border-gray-200 shadow-sm cursor-pointer hover:ring-4 hover:ring-blue-300 transition-all">
+                                                <img src={preview} alt={`Intérieur ${idx + 1}`} className="h-28 w-28 object-cover rounded-lg block" />
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => { e.stopPropagation(); handleRemovePhoto('photos_interieur', idx); }}
+                                                    className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shadow hover:bg-red-700 transition-colors z-30"
+                                                >
+                                                    ✕
+                                                </button>
+                                            </div>
                                         ))}
                                         <label className="flex flex-col items-center justify-center w-28 h-28 border-2 border-dashed border-blue-200 rounded-xl cursor-pointer bg-blue-50/50 hover:bg-blue-50 transition-colors">
                                             <span className="text-xl mb-1">📷</span>
@@ -1675,30 +1708,30 @@ const [enlargedPhotoUrl, setEnlargedPhotoUrl] = useState<string | null>(null);
                 isDeleting={isDeleting}
             />
 
-{/* MODAL VISIONNEUSE PHOTOS (Couvercle / Intérieur) */}
+            {/* MODAL VISIONNEUSE PHOTOS (Couvercle / Intérieur) */}
             {enlargedPhotoUrl && (
-                <div 
-                    className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4" 
+                <div
+                    className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4"
                     onClick={() => setEnlargedPhotoUrl(null)}
                 >
                     <div className="relative max-w-full max-h-full flex items-center justify-center">
-                        <button 
-                            type="button" 
-                            onClick={(e) => { e.stopPropagation(); setEnlargedPhotoUrl(null); }} 
+                        <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setEnlargedPhotoUrl(null); }}
                             className="absolute -top-4 -right-4 sm:-top-6 sm:-right-6 bg-red-600 text-white rounded-full w-10 h-10 flex items-center justify-center font-bold text-xl shadow-lg z-[70] hover:bg-red-700 transition-colors"
                         >
                             ✕
                         </button>
-                        <img 
-                            src={enlargedPhotoUrl} 
-                            alt="Agrandissement" 
-                            className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl" 
-                            onClick={(e) => e.stopPropagation()} 
+                        <img
+                            src={enlargedPhotoUrl}
+                            alt="Agrandissement"
+                            className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+                            onClick={(e) => e.stopPropagation()}
                         />
                     </div>
                 </div>
             )}
-            
+
         </div>
     );
 }
