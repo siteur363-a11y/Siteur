@@ -3,6 +3,16 @@ import { MapRecenter, MapClickHandler, ZoomIndicator, OfflineMapManager } from '
 import { RepereModal } from '../modals/RepereModal';
 import { FlagEditModal } from '../modals/FlagEditModal';
 
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+
+const blueIcon = new L.Icon({
+    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
+    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.3.1/images/marker-shadow.png',
+    iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+});
+
+
 export const SaisieTab = ({ saisieState, isOnline }: any) => {
     const {
         rhf, nonTrouvee, formeSelectionnee, editId, isViewMode, setIsViewMode, isSubmitting, activeCoords, reperesList, currentRepere, setCurrentRepere,
@@ -12,7 +22,7 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
         handlePhotoCapture, handleRemovePhoto, fetchAddressAndCadastre, handleCaptureLocation, handleAddRepere, handleRemoveRepere, resetSaisie, onSubmit, location
     } = saisieState;
 
-const { register, handleSubmit, formState: { errors }, getValues, watch } = rhf; // 
+    const { register, handleSubmit, formState: { errors }, getValues, watch } = rhf; // 
 
     return (
         <>
@@ -36,75 +46,73 @@ const { register, handleSubmit, formState: { errors }, getValues, watch } = rhf;
                     )}
 
                     {/* GENERAL */}
-<section className="bg-white p-4 lg:p-8 rounded-xl shadow-sm lg:shadow border border-gray-200 transition-shadow duration-300 hover:shadow-md">
-    <h2 className="text-xl lg:text-2xl font-bold mb-5 text-blue-800 border-b pb-3">Informations Générales</h2>
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 items-start">
-        <div className="lg:col-span-2">
-            <label className="block text-sm lg:text-sm font-semibold text-gray-700 mb-1.5">
-                ID Ouvrage {isOnline ? '*' : <span className="text-xs text-blue-600 font-normal italic">(Calculé à l'export)</span>}
-            </label>
-            <input 
-                {...register("id_ouvrage", { required: isOnline ? "Ce champ est obligatoire en ligne" : false })} 
-                disabled={isViewMode}
-                className={`w-full p-3 lg:p-2.5 border rounded-lg text-lg lg:text-base focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${getFieldBg('id_ouvrage')} ${isViewMode ? 'bg-gray-100 text-gray-900 font-semibold opacity-100 cursor-default' : ''}`} 
-                placeholder={isOnline ? "Ex: 27638-AA0142-BR-01" : "Sera déduit avec le GPS"} 
-            />
-            {errors.id_ouvrage && <span className="text-red-500 text-sm mt-1">{errors.id_ouvrage.message as string}</span>}
-        </div>
-        <div>
-            <label className="block text-sm lg:text-sm font-semibold text-gray-700 mb-1.5">Technicien *</label>
-            <input 
-                {...register("technicien", { required: "Ce champ est obligatoire" })} 
-                disabled={isViewMode}
-                className={`w-full p-3 lg:p-2.5 border rounded-lg text-lg lg:text-base focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${getFieldBg('technicien')} ${isViewMode ? 'bg-gray-100 text-gray-900 font-semibold opacity-100 cursor-default' : ''}`} 
-            />
-            {errors.technicien && <span className="text-red-500 text-sm mt-1">{errors.technicien.message as string}</span>}
-        </div>
-        <div>
-            <label className="block text-sm lg:text-sm font-semibold text-gray-700 mb-1.5">Date de récolement *</label>
-            <input 
-                type="date" 
-                disabled={isViewMode}
-                {...register("date_recolement", { required: "Date requise" })} 
-                className={`w-full p-3 lg:p-2.5 border rounded-lg text-lg lg:text-base focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${getFieldBg('date_recolement')} ${isViewMode ? 'bg-gray-100 text-gray-900 font-semibold opacity-100 cursor-default' : ''}`} 
-            />
-        </div>
+                    <section className="bg-white p-4 lg:p-8 rounded-xl shadow-sm lg:shadow border border-gray-200 transition-shadow duration-300 hover:shadow-md">
+                        <h2 className="text-xl lg:text-2xl font-bold mb-5 text-blue-800 border-b pb-3">Informations Générales</h2>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 items-start">
+                            <div className="lg:col-span-2">
+                                <label className="block text-sm lg:text-sm font-semibold text-gray-700 mb-1.5">
+                                    ID Ouvrage {isOnline ? '*' : <span className="text-xs text-blue-600 font-normal italic">(Calculé à l'export)</span>}
+                                </label>
+                                <input
+                                    {...register("id_ouvrage", { required: isOnline ? "Ce champ est obligatoire en ligne" : false })}
+                                    disabled={isViewMode}
+                                    className={`w-full p-3 lg:p-2.5 border rounded-lg text-lg lg:text-base focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${getFieldBg('id_ouvrage')} ${isViewMode ? 'bg-gray-100 text-gray-900 font-semibold opacity-100 cursor-default' : ''}`}
+                                    placeholder={isOnline ? "Ex: 27638-AA0142-BR-01" : "Sera déduit avec le GPS"}
+                                />
+                                {errors.id_ouvrage && <span className="text-red-500 text-sm mt-1">{errors.id_ouvrage.message as string}</span>}
+                            </div>
+                            <div>
+                                <label className="block text-sm lg:text-sm font-semibold text-gray-700 mb-1.5">Technicien *</label>
+                                <input
+                                    {...register("technicien", { required: "Ce champ est obligatoire" })}
+                                    disabled={isViewMode}
+                                    className={`w-full p-3 lg:p-2.5 border rounded-lg text-lg lg:text-base focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${getFieldBg('technicien')} ${isViewMode ? 'bg-gray-100 text-gray-900 font-semibold opacity-100 cursor-default' : ''}`}
+                                />
+                                {errors.technicien && <span className="text-red-500 text-sm mt-1">{errors.technicien.message as string}</span>}
+                            </div>
+                            <div>
+                                <label className="block text-sm lg:text-sm font-semibold text-gray-700 mb-1.5">Date de récolement *</label>
+                                <input
+                                    type="date"
+                                    disabled={isViewMode}
+                                    {...register("date_recolement", { required: "Date requise" })}
+                                    className={`w-full p-3 lg:p-2.5 border rounded-lg text-lg lg:text-base focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${getFieldBg('date_recolement')} ${isViewMode ? 'bg-gray-100 text-gray-900 font-semibold opacity-100 cursor-default' : ''}`}
+                                />
+                            </div>
 
-{/* Case Ouvrage non trouvé / Inaccessible (Uniformisée en bleu) */}
-        {(() => {
-            const isNonTrouveeChecked = watch("non_trouvee");
+                            {/* Case Ouvrage non trouvé / Inaccessible (Uniformisée en bleu) */}
+                            {(() => {
+                                const isNonTrouveeChecked = watch("non_trouvee");
 
-            return (
-                <div className={`flex items-center space-x-3 pt-2 col-span-1 md:col-span-2 lg:col-span-4 lg:p-3 lg:rounded-lg lg:border lg:w-fit transition-colors shadow-sm ${
-                    isViewMode 
-                        ? (isNonTrouveeChecked 
-                            ? 'bg-blue-100/90 border-blue-400 text-blue-950 font-semibold shadow-inner' 
-                            : 'bg-gray-100/60 border-gray-200 text-gray-400 opacity-60'
-                        )
-                        : 'lg:bg-gray-50 lg:border-gray-100 hover:bg-blue-50 cursor-pointer bg-gray-50'
-                }`}>
-                    <input 
-                        type="checkbox" 
-                        id="non_trouvee" 
-                        disabled={isViewMode}
-                        {...register("non_trouvee")} 
-                        className="w-5 h-5 text-blue-600 rounded border-gray-300 accent-blue-600" 
-                    />
-                    <label 
-                        htmlFor="non_trouvee" 
-                        className={`text-sm lg:text-base font-medium ${
-                            isViewMode 
-                                ? (isNonTrouveeChecked ? 'text-blue-950 font-bold cursor-default' : 'text-gray-400 cursor-default') 
-                                : 'text-gray-800 cursor-pointer'
-                        }`}
-                    >
-                        Ouvrage non trouvé / Inaccessible
-                    </label>
-                </div>
-            );
-        })()}
-    </div>
-</section>
+                                return (
+                                    <div className={`flex items-center space-x-3 pt-2 col-span-1 md:col-span-2 lg:col-span-4 lg:p-3 lg:rounded-lg lg:border lg:w-fit transition-colors shadow-sm ${isViewMode
+                                            ? (isNonTrouveeChecked
+                                                ? 'bg-blue-100/90 border-blue-400 text-blue-950 font-semibold shadow-inner'
+                                                : 'bg-gray-100/60 border-gray-200 text-gray-400 opacity-60'
+                                            )
+                                            : 'lg:bg-gray-50 lg:border-gray-100 hover:bg-blue-50 cursor-pointer bg-gray-50'
+                                        }`}>
+                                        <input
+                                            type="checkbox"
+                                            id="non_trouvee"
+                                            disabled={isViewMode}
+                                            {...register("non_trouvee")}
+                                            className="w-5 h-5 text-blue-600 rounded border-gray-300 accent-blue-600"
+                                        />
+                                        <label
+                                            htmlFor="non_trouvee"
+                                            className={`text-sm lg:text-base font-medium ${isViewMode
+                                                    ? (isNonTrouveeChecked ? 'text-blue-950 font-bold cursor-default' : 'text-gray-400 cursor-default')
+                                                    : 'text-gray-800 cursor-pointer'
+                                                }`}
+                                        >
+                                            Ouvrage non trouvé / Inaccessible
+                                        </label>
+                                    </div>
+                                );
+                            })()}
+                        </div>
+                    </section>
 
                     {/* 1 - IDENTIFICATION */}
                     <section className="bg-white p-4 lg:p-8 rounded-xl shadow-sm lg:shadow border border-gray-200 transition-shadow duration-300 hover:shadow-md">
@@ -132,7 +140,9 @@ const { register, handleSubmit, formState: { errors }, getValues, watch } = rhf;
                                                     <LayersControl.BaseLayer checked name="Satellite (IGN)"><TileLayer url="https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}" maxZoom={19} /></LayersControl.BaseLayer>
                                                     <LayersControl.Overlay checked name="Cadastre (IGN)"><WMSTileLayer url="https://wxs.ign.fr/essentiels/geoportail/wms?" layers="CADASTRALPARCELS.PARCELS" format="image/png" transparent={true} version="1.3.0" /></LayersControl.Overlay>
                                                 </LayersControl>
-                                                <Marker position={[activeCoords.lat, activeCoords.lon]}><Popup>Ouvrage sélectionné</Popup></Marker>
+                                                <Marker position={[activeCoords.lat, activeCoords.lon]} icon={blueIcon}>
+                                                    <Popup>Ouvrage sélectionné</Popup>
+                                                </Marker>
                                             </MapContainer>
                                         </div>
                                     </>
@@ -358,80 +368,79 @@ const { register, handleSubmit, formState: { errors }, getValues, watch } = rhf;
                             </section>
 
                             {/* 5 - ACTIONS */}
-<section className="bg-white p-4 lg:p-8 rounded-xl shadow-sm lg:shadow border border-gray-200 transition-shadow duration-300 hover:shadow-md">
-    <h2 className="text-xl lg:text-2xl font-bold mb-5 text-blue-800 border-b pb-3">5 - Action(s) préconisée(s)</h2>
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 lg:gap-4">
-        {["R.A.S.", "Curage / Nettoyage", "Débouchage / Dégorgement", "Remplacement du tampon", "Réparation du cadre", "Remise à niveau de l'arase", "Traitement des infiltrations", "Dégagement d'accès", "Reprise de raccordement", "Traitement anti-corrosion / Réfection", "Dégrippage / Déblocage"].map((action, idx) => {
-            // Vérifie si l'action fait partie des éléments cochés
-            const isChecked = watch("actions_preconisees")?.includes(action);
+                            <section className="bg-white p-4 lg:p-8 rounded-xl shadow-sm lg:shadow border border-gray-200 transition-shadow duration-300 hover:shadow-md">
+                                <h2 className="text-xl lg:text-2xl font-bold mb-5 text-blue-800 border-b pb-3">5 - Action(s) préconisée(s)</h2>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 lg:gap-4">
+                                    {["R.A.S.", "Curage / Nettoyage", "Débouchage / Dégorgement", "Remplacement du tampon", "Réparation du cadre", "Remise à niveau de l'arase", "Traitement des infiltrations", "Dégagement d'accès", "Reprise de raccordement", "Traitement anti-corrosion / Réfection", "Dégrippage / Déblocage"].map((action, idx) => {
+                                        // Vérifie si l'action fait partie des éléments cochés
+                                        const isChecked = watch("actions_preconisees")?.includes(action);
 
-            return (
-                <label 
-                    key={idx} 
-                    className={`flex items-center gap-3 p-3 lg:p-3 border rounded-lg transition-colors shadow-sm ${
-                        isViewMode 
-                            ? (isChecked 
-                                ? 'bg-blue-100/90 border-blue-400 text-blue-950 font-semibold shadow-inner' // Style bien visible si coché en affichage
-                                : 'bg-gray-100/60 border-gray-200 text-gray-400 opacity-60'   // Grisé discret si non coché en affichage
-                            )
-                            : 'hover:bg-blue-50 cursor-pointer bg-gray-50' // Style normal en mode saisie/édition
-                    }`}
-                >
-                    <input 
-                        type="checkbox" 
-                        value={action} 
-                        disabled={isViewMode} // Désactive l'interaction en mode affichage
-                        {...register("actions_preconisees")} 
-                        className="w-5 h-5 lg:w-4 lg:h-4 text-blue-600 rounded border-gray-300 accent-blue-600" 
-                    />
-                    <span className={`font-medium lg:text-sm ${isViewMode ? (isChecked ? 'text-blue-950 font-bold' : 'text-gray-400') : 'text-gray-800'}`}>
-                        {action}
-                    </span>
-                </label>
-            );
-        })}
-    </div>
-    <div className="pt-6">
-        <div className="flex justify-between items-center mb-2">
-            <label className="block text-sm lg:text-sm font-semibold text-gray-700">Précisions</label>
-            {!isViewMode && (
-                <button type="button" onClick={() => toggleDictation('action_precision')} className={`text-sm lg:text-sm px-3 py-1.5 rounded-full border shadow-sm transition-colors ${listeningField === 'action_precision' ? 'bg-red-600 text-white animate-pulse border-red-600' : 'bg-white hover:bg-gray-50'}`}>
-                    🎤 Dicter
-                </button>
-            )}
-        </div>
-        <textarea {...register("action_precision")} rows={3} className={`w-full p-3 lg:p-3 border rounded-lg text-lg lg:text-base outline-none transition-colors ${getFieldBg('action_precision')}`} />
-    </div>
-</section>
+                                        return (
+                                            <label
+                                                key={idx}
+                                                className={`flex items-center gap-3 p-3 lg:p-3 border rounded-lg transition-colors shadow-sm ${isViewMode
+                                                        ? (isChecked
+                                                            ? 'bg-blue-100/90 border-blue-400 text-blue-950 font-semibold shadow-inner' // Style bien visible si coché en affichage
+                                                            : 'bg-gray-100/60 border-gray-200 text-gray-400 opacity-60'   // Grisé discret si non coché en affichage
+                                                        )
+                                                        : 'hover:bg-blue-50 cursor-pointer bg-gray-50' // Style normal en mode saisie/édition
+                                                    }`}
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    value={action}
+                                                    disabled={isViewMode} // Désactive l'interaction en mode affichage
+                                                    {...register("actions_preconisees")}
+                                                    className="w-5 h-5 lg:w-4 lg:h-4 text-blue-600 rounded border-gray-300 accent-blue-600"
+                                                />
+                                                <span className={`font-medium lg:text-sm ${isViewMode ? (isChecked ? 'text-blue-950 font-bold' : 'text-gray-400') : 'text-gray-800'}`}>
+                                                    {action}
+                                                </span>
+                                            </label>
+                                        );
+                                    })}
+                                </div>
+                                <div className="pt-6">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <label className="block text-sm lg:text-sm font-semibold text-gray-700">Précisions</label>
+                                        {!isViewMode && (
+                                            <button type="button" onClick={() => toggleDictation('action_precision')} className={`text-sm lg:text-sm px-3 py-1.5 rounded-full border shadow-sm transition-colors ${listeningField === 'action_precision' ? 'bg-red-600 text-white animate-pulse border-red-600' : 'bg-white hover:bg-gray-50'}`}>
+                                                🎤 Dicter
+                                            </button>
+                                        )}
+                                    </div>
+                                    <textarea {...register("action_precision")} rows={3} className={`w-full p-3 lg:p-3 border rounded-lg text-lg lg:text-base outline-none transition-colors ${getFieldBg('action_precision')}`} />
+                                </div>
+                            </section>
                         </>
                     )}
                 </fieldset> {/* FIN DU FIELDSET QUI VERROUILLE LE FORMULAIRE */}
 
                 {/* Barre d'action fixe en bas avec arrière-plan flouté et bouton centré sur grand écran */}
-<div className="fixed bottom-0 left-0 right-0 p-4 bg-white/95 backdrop-blur-sm border-t border-gray-200 shadow-[0_-10px_25px_-5px_rgba(0,0,0,0.1)] z-40">
-    <div className="max-w-6xl mx-auto flex justify-center">
-{isViewMode ? (
-    <button 
-        type="button" 
-        onClick={(e) => {
-            e.preventDefault(); // 👈 Stoppe net toute propagation ou action par défaut
-            setIsViewMode(false);
-        }} 
-        className="w-full md:w-3/4 lg:w-1/2 py-4 lg:py-3 rounded-xl text-xl lg:text-lg font-bold text-white shadow-md bg-blue-600 hover:bg-blue-700 transition-colors"
-    >
-        ✏️ Passer en mode modification
-    </button>
-) : (
-    <button 
-        type="submit" 
-        disabled={isSubmitting} 
-        className={`w-full md:w-3/4 lg:w-1/2 py-4 lg:py-3 rounded-xl text-xl lg:text-lg font-bold text-white shadow-md transition-colors ${isSubmitting ? 'bg-blue-400 animate-pulse' : 'bg-blue-700 hover:bg-blue-800'}`}
-    >
-        {isSubmitting ? '⏳ Traitement...' : (editId ? 'Sauvegarder' : 'Enregistrer')}
-    </button>
-)}
-    </div>
-</div>
+                <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/95 backdrop-blur-sm border-t border-gray-200 shadow-[0_-10px_25px_-5px_rgba(0,0,0,0.1)] z-40">
+                    <div className="max-w-6xl mx-auto flex justify-center">
+                        {isViewMode ? (
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.preventDefault(); // 👈 Stoppe net toute propagation ou action par défaut
+                                    setIsViewMode(false);
+                                }}
+                                className="w-full md:w-3/4 lg:w-1/2 py-4 lg:py-3 rounded-xl text-xl lg:text-lg font-bold text-white shadow-md bg-blue-600 hover:bg-blue-700 transition-colors"
+                            >
+                                ✏️ Passer en mode modification
+                            </button>
+                        ) : (
+                            <button
+                                type="submit"
+                                disabled={isSubmitting}
+                                className={`w-full md:w-3/4 lg:w-1/2 py-4 lg:py-3 rounded-xl text-xl lg:text-lg font-bold text-white shadow-md transition-colors ${isSubmitting ? 'bg-blue-400 animate-pulse' : 'bg-blue-700 hover:bg-blue-800'}`}
+                            >
+                                {isSubmitting ? '⏳ Traitement...' : (editId ? 'Sauvegarder' : 'Enregistrer')}
+                            </button>
+                        )}
+                    </div>
+                </div>
             </form>
 
             <RepereModal isOpen={isRepereModalOpen} onClose={() => setIsRepereModalOpen(false)} currentRepere={currentRepere} setCurrentRepere={setCurrentRepere} onAddRepere={handleAddRepere} toggleDictation={toggleDictation} />
