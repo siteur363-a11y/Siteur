@@ -6,6 +6,12 @@ import { FlagEditModal } from '../modals/FlagEditModal';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
+const redIcon = new L.Icon({
+    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.3.1/images/marker-shadow.png',
+    iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+});
+
 const blueIcon = new L.Icon({
     iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
     shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.3.1/images/marker-shadow.png',
@@ -23,7 +29,7 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
     } = saisieState;
 
     const { register, handleSubmit, formState: { errors }, getValues, watch } = rhf; // 
-
+    const isNonTrouvee = watch("non_trouvee");
     return (
         <>
             <form onSubmit={handleSubmit(onSubmit, (_formErrors: any) => {
@@ -86,11 +92,11 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
 
                                 return (
                                     <div className={`flex items-center space-x-3 pt-2 col-span-1 md:col-span-2 lg:col-span-4 lg:p-3 lg:rounded-lg lg:border lg:w-fit transition-colors shadow-sm ${isViewMode
-                                            ? (isNonTrouveeChecked
-                                                ? 'bg-blue-100/90 border-blue-400 text-blue-950 font-semibold shadow-inner'
-                                                : 'bg-gray-100/60 border-gray-200 text-gray-400 opacity-60'
-                                            )
-                                            : 'lg:bg-gray-50 lg:border-gray-100 hover:bg-blue-50 cursor-pointer bg-gray-50'
+                                        ? (isNonTrouveeChecked
+                                            ? 'bg-blue-100/90 border-blue-400 text-blue-950 font-semibold shadow-inner'
+                                            : 'bg-gray-100/60 border-gray-200 text-gray-400 opacity-60'
+                                        )
+                                        : 'lg:bg-gray-50 lg:border-gray-100 hover:bg-blue-50 cursor-pointer bg-gray-50'
                                         }`}>
                                         <input
                                             type="checkbox"
@@ -102,8 +108,8 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                                         <label
                                             htmlFor="non_trouvee"
                                             className={`text-sm lg:text-base font-medium ${isViewMode
-                                                    ? (isNonTrouveeChecked ? 'text-blue-950 font-bold cursor-default' : 'text-gray-400 cursor-default')
-                                                    : 'text-gray-800 cursor-pointer'
+                                                ? (isNonTrouveeChecked ? 'text-blue-950 font-bold cursor-default' : 'text-gray-400 cursor-default')
+                                                : 'text-gray-800 cursor-pointer'
                                                 }`}
                                         >
                                             Ouvrage non trouvé / Inaccessible
@@ -140,7 +146,10 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                                                     <LayersControl.BaseLayer checked name="Satellite (IGN)"><TileLayer url="https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}" maxZoom={19} /></LayersControl.BaseLayer>
                                                     <LayersControl.Overlay checked name="Cadastre (IGN)"><WMSTileLayer url="https://wxs.ign.fr/essentiels/geoportail/wms?" layers="CADASTRALPARCELS.PARCELS" format="image/png" transparent={true} version="1.3.0" /></LayersControl.Overlay>
                                                 </LayersControl>
-                                                <Marker position={[activeCoords.lat, activeCoords.lon]} icon={blueIcon}>
+                                                <Marker
+                                                    position={[activeCoords.lat, activeCoords.lon]}
+                                                    icon={isNonTrouvee ? redIcon : blueIcon}
+                                                >
                                                     <Popup>Ouvrage sélectionné</Popup>
                                                 </Marker>
                                             </MapContainer>
@@ -379,11 +388,11 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                                             <label
                                                 key={idx}
                                                 className={`flex items-center gap-3 p-3 lg:p-3 border rounded-lg transition-colors shadow-sm ${isViewMode
-                                                        ? (isChecked
-                                                            ? 'bg-blue-100/90 border-blue-400 text-blue-950 font-semibold shadow-inner' // Style bien visible si coché en affichage
-                                                            : 'bg-gray-100/60 border-gray-200 text-gray-400 opacity-60'   // Grisé discret si non coché en affichage
-                                                        )
-                                                        : 'hover:bg-blue-50 cursor-pointer bg-gray-50' // Style normal en mode saisie/édition
+                                                    ? (isChecked
+                                                        ? 'bg-blue-100/90 border-blue-400 text-blue-950 font-semibold shadow-inner' // Style bien visible si coché en affichage
+                                                        : 'bg-gray-100/60 border-gray-200 text-gray-400 opacity-60'   // Grisé discret si non coché en affichage
+                                                    )
+                                                    : 'hover:bg-blue-50 cursor-pointer bg-gray-50' // Style normal en mode saisie/édition
                                                     }`}
                                             >
                                                 <input
