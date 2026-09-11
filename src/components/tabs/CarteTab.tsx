@@ -11,6 +11,12 @@ const redIcon = new L.Icon({
     iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
 });
 
+const blueIcon = new L.Icon({
+    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
+    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.3.1/images/marker-shadow.png',
+    iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+});
+
 function MapFitBounds({ markers }: { markers: { latitude: number; longitude: number }[] }) {
     const map = useMap();
     useEffect(() => {
@@ -165,27 +171,31 @@ export const CarteTab = ({
                             </LayersControl>
                             {filteredMapRecords.length > 0 && <MapFitBounds markers={filteredMapRecords} />}
                             {filteredMapRecords.map((record: any) => (
-                                <Marker key={record.id || record.id_ouvrage} position={[record.latitude, record.longitude]} {...(record.non_trouvee ? { icon: redIcon } : {})}>
-                                    <Popup>
-                                        <div className="p-1 space-y-2 min-w-[180px]">
-                                            <div className="font-bold text-blue-900 border-b pb-1 text-sm">{record.id_ouvrage}</div>
-                                            <div className="text-xs text-gray-700 space-y-1">
-                                                <div className="flex items-start gap-1">
-                                                    <span>📍</span>
-                                                    <div className="font-medium">
-                                                        {(record.voie_numero || record.voie_nom) && <div>{[record.voie_numero, record.voie_nom].filter(Boolean).join(' ')}</div>}
-                                                        {(record.code_postal || record.commune) && <div>{[record.code_postal, record.commune].filter(Boolean).join(' ')}</div>}
-                                                        {!record.voie_nom && !record.commune && <div>Adresse N.R.</div>}
-                                                    </div>
-                                                </div>
-                                                <p>📅 {record.date_recolement ? new Date(record.date_recolement).toLocaleDateString('fr-FR') : 'Date N.R.'}</p>
-                                            </div>
-                                            <button type="button" onClick={() => handleEditRecord(record, 'view')} className="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-1.5 px-3 rounded text-xs transition-colors shadow flex items-center justify-center gap-1 cursor-pointer">
-                                                🔍 Afficher
-                                            </button>
-                                        </div>
-                                    </Popup>
-                                </Marker>
+<Marker 
+    key={record.id || record.id_ouvrage}
+    position={[record.latitude, record.longitude]}
+    icon={record.non_trouvee ? redIcon : blueIcon}
+>
+    <Popup>
+        <div className="p-1 space-y-2 min-w-[180px]">
+            <div className="font-bold text-blue-900 border-b pb-1 text-sm">{record.id_ouvrage}</div>
+            <div className="text-xs text-gray-700 space-y-1">
+                <div className="flex items-start gap-1">
+                    <span>📍</span>
+                    <div className="font-medium">
+                        {(record.voie_numero || record.voie_nom) && <div>{[record.voie_numero, record.voie_nom].filter(Boolean).join(' ')}</div>}
+                        {(record.code_postal || record.commune) && <div>{[record.code_postal, record.commune].filter(Boolean).join(' ')}</div>}
+                        {!record.voie_nom && !record.commune && <div>Adresse N.R.</div>}
+                    </div>
+                </div>
+                <p>📅 {record.date_recolement ? new Date(record.date_recolement).toLocaleDateString('fr-FR') : 'Date N.R.'}</p>
+            </div>
+            <button type="button" onClick={() => handleEditRecord(record, 'view')} className="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-1.5 px-3 rounded text-xs transition-colors shadow flex items-center justify-center gap-1 cursor-pointer">
+                🔍 Afficher
+            </button>
+        </div>
+    </Popup>
+</Marker>
                             ))}
                         </MapContainer>
                     </div>
