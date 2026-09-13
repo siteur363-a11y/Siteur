@@ -11,10 +11,42 @@ export function useAppLogic() {
     const [historique, setHistorique] = useState<any[]>([]);
     const [isLoadingHist, setIsLoadingHist] = useState<boolean>(false);
 
+    // États pour la connexion
+    const [user, setUser] = useState<any>(null);
+    const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+
     const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
         setToast({ message, type });
         setTimeout(() => setToast(null), 5000);
     }, []);
+
+    // 🔑 Écoute de la session Supabase
+    useEffect(() => {
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            setUser(session?.user ?? null);
+        });
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            setUser(session?.user ?? null);
+        });
+
+        return () => subscription.unsubscribe();
+    }, []);
+
+    // 🎯 Bascule automatique vers l'onglet "saisie" quand Sébastien se connecte
+    useEffect(() => {
+        if (user?.email === 'sebastien.guedes@gmail.com') {
+            setActiveTab('saisie');
+        }
+    }, [user]);
+
+    // 🔑 Droit de modification réservé à votre adresse
+    const canEdit = user?.email === 'sebastien.guedes@gmail.com';
+
+    // 🔑 Fonction de déconnexion
+    const handleLogout = async () => {
+        await supabase.auth.signOut();
+    };
 
     // Fonction globale pour récupérer l'historique
     const fetchHistorique = useCallback(async () => {
@@ -45,10 +77,16 @@ export function useAppLogic() {
         toast,
         setToast,
         showToast,
-        // Exposition des données et contrôles de l'historique
+        // Historique
         historique,
         setHistorique,
         isLoadingHist,
-        fetchHistorique
+        fetchHistorique,
+        // Auth
+        user,
+        canEdit,
+        handleLogout,
+        isLoginModalOpen,
+        setIsLoginModalOpen
     };
 }

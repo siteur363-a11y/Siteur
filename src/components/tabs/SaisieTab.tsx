@@ -19,7 +19,7 @@ const blueIcon = new L.Icon({
 });
 
 
-export const SaisieTab = ({ saisieState, isOnline }: any) => {
+export const SaisieTab = ({ saisieState, isOnline, canEdit }: any) => {
     const {
         rhf, nonTrouvee, formeSelectionnee, editId, isViewMode, setIsViewMode, isSubmitting, activeCoords, reperesList, currentRepere, setCurrentRepere,
         isRepereModalOpen, setIsRepereModalOpen, showSituationFlag, setShowSituationFlag, situationFlagPos,
@@ -28,8 +28,25 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
         handlePhotoCapture, handleRemovePhoto, fetchAddressAndCadastre, handleCaptureLocation, handleAddRepere, handleRemoveRepere, resetSaisie, onSubmit, location
     } = saisieState;
 
-    const { register, handleSubmit, formState: { errors }, getValues, watch } = rhf; // 
+    const { register, handleSubmit, formState: { errors }, getValues, watch } = rhf;
     const isNonTrouvee = watch("non_trouvee");
+
+    // 🔒 Bloque la création si non autorisé et qu'aucun ouvrage n'est sélectionné
+    if (!canEdit && !editId) {
+        return (
+            <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-200 text-center max-w-md mx-auto my-12">
+                <div className="text-4xl mb-3">🔒</div>
+                <h2 className="text-lg font-bold text-gray-800 mb-2">Accès restreint</h2>
+                <p className="text-gray-600 text-sm leading-relaxed">
+                    Vous n'ètes pas autorisé saisir un nouvel ouvrage.
+                </p>
+            </div>
+        );
+    }
+
+    // Force le mode lecture seule si l'utilisateur n'a pas les droits d'édition
+    const effectiveIsViewMode = isViewMode || !canEdit;
+
     return (
         <>
             <form onSubmit={handleSubmit(onSubmit, (_formErrors: any) => {
@@ -38,14 +55,14 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
             })}>
 
                 {/* Conteneur principal limité en largeur sur PC (max-w-6xl) et centré */}
-                <fieldset disabled={isViewMode} className="space-y-8 lg:space-y-10 max-w-6xl mx-auto pb-32">
+                <fieldset disabled={effectiveIsViewMode} className="space-y-8 lg:space-y-10 max-w-6xl mx-auto pb-32">
 
                     {editId && (
-                        <div className={`${isViewMode ? 'bg-blue-100 border-blue-300 text-blue-800' : 'bg-amber-100 border-amber-300 text-amber-800'} p-3 lg:p-4 rounded-xl flex justify-between items-center shadow-sm lg:shadow transition-colors border`}>
+                        <div className={`${effectiveIsViewMode ? 'bg-blue-100 border-blue-300 text-blue-800' : 'bg-amber-100 border-amber-300 text-amber-800'} p-3 lg:p-4 rounded-xl flex justify-between items-center shadow-sm lg:shadow transition-colors border`}>
                             <div className="font-medium text-sm sm:text-base lg:text-lg">
-                                {isViewMode ? '🔍 Vous consultez l\'ouvrage :' : '✏️ Vous modifiez l\'ouvrage :'} <span className="font-bold">{getValues('id_ouvrage')}</span>
+                                {effectiveIsViewMode ? '🔍 Vous consultez l\'ouvrage :' : '✏️ Vous modifiez l\'ouvrage :'} <span className="font-bold">{getValues('id_ouvrage')}</span>
                             </div>
-                            <button type="button" onClick={resetSaisie} className={`${isViewMode ? 'text-blue-800 bg-blue-200 hover:bg-blue-300' : 'text-amber-800 bg-amber-200 hover:bg-amber-300'} text-sm lg:text-base font-bold px-4 py-2 rounded-lg transition-colors`}>
+                            <button type="button" onClick={resetSaisie} className={`${effectiveIsViewMode ? 'text-blue-800 bg-blue-200 hover:bg-blue-300' : 'text-amber-800 bg-amber-200 hover:bg-amber-300'} text-sm lg:text-base font-bold px-4 py-2 rounded-lg transition-colors`}>
                                 Fermer
                             </button>
                         </div>
@@ -61,8 +78,8 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                                 </label>
                                 <input
                                     {...register("id_ouvrage", { required: isOnline ? "Ce champ est obligatoire en ligne" : false })}
-                                    disabled={isViewMode}
-                                    className={`w-full p-3 lg:p-2.5 border rounded-lg text-lg lg:text-base focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${getFieldBg('id_ouvrage')} ${isViewMode ? 'bg-gray-100 text-gray-900 font-semibold opacity-100 cursor-default' : ''}`}
+                                    disabled={effectiveIsViewMode}
+                                    className={`w-full p-3 lg:p-2.5 border rounded-lg text-lg lg:text-base focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${getFieldBg('id_ouvrage')} ${effectiveIsViewMode ? 'bg-gray-100 text-gray-900 font-semibold opacity-100 cursor-default' : ''}`}
                                     placeholder={isOnline ? "Ex: 27638-AA0142-BR-01" : "Sera déduit avec le GPS"}
                                 />
                                 {errors.id_ouvrage && <span className="text-red-500 text-sm mt-1">{errors.id_ouvrage.message as string}</span>}
@@ -71,8 +88,8 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                                 <label className="block text-sm lg:text-sm font-semibold text-gray-700 mb-1.5">Technicien *</label>
                                 <input
                                     {...register("technicien", { required: "Ce champ est obligatoire" })}
-                                    disabled={isViewMode}
-                                    className={`w-full p-3 lg:p-2.5 border rounded-lg text-lg lg:text-base focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${getFieldBg('technicien')} ${isViewMode ? 'bg-gray-100 text-gray-900 font-semibold opacity-100 cursor-default' : ''}`}
+                                    disabled={effectiveIsViewMode}
+                                    className={`w-full p-3 lg:p-2.5 border rounded-lg text-lg lg:text-base focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${getFieldBg('technicien')} ${effectiveIsViewMode ? 'bg-gray-100 text-gray-900 font-semibold opacity-100 cursor-default' : ''}`}
                                 />
                                 {errors.technicien && <span className="text-red-500 text-sm mt-1">{errors.technicien.message as string}</span>}
                             </div>
@@ -80,18 +97,18 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                                 <label className="block text-sm lg:text-sm font-semibold text-gray-700 mb-1.5">Date de récolement *</label>
                                 <input
                                     type="date"
-                                    disabled={isViewMode}
+                                    disabled={effectiveIsViewMode}
                                     {...register("date_recolement", { required: "Date requise" })}
-                                    className={`w-full p-3 lg:p-2.5 border rounded-lg text-lg lg:text-base focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${getFieldBg('date_recolement')} ${isViewMode ? 'bg-gray-100 text-gray-900 font-semibold opacity-100 cursor-default' : ''}`}
+                                    className={`w-full p-3 lg:p-2.5 border rounded-lg text-lg lg:text-base focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${getFieldBg('date_recolement')} ${effectiveIsViewMode ? 'bg-gray-100 text-gray-900 font-semibold opacity-100 cursor-default' : ''}`}
                                 />
                             </div>
 
-                            {/* Case Ouvrage non trouvé / Inaccessible (Uniformisée en bleu) */}
+                            {/* Case Ouvrage non trouvé / Inaccessible */}
                             {(() => {
                                 const isNonTrouveeChecked = watch("non_trouvee");
 
                                 return (
-                                    <div className={`flex items-center space-x-3 pt-2 col-span-1 md:col-span-2 lg:col-span-4 lg:p-3 lg:rounded-lg lg:border lg:w-fit transition-colors shadow-sm ${isViewMode
+                                    <div className={`flex items-center space-x-3 pt-2 col-span-1 md:col-span-2 lg:col-span-4 lg:p-3 lg:rounded-lg lg:border lg:w-fit transition-colors shadow-sm ${effectiveIsViewMode
                                         ? (isNonTrouveeChecked
                                             ? 'bg-blue-100/90 border-blue-400 text-blue-950 font-semibold shadow-inner'
                                             : 'bg-gray-100/60 border-gray-200 text-gray-400 opacity-60'
@@ -101,13 +118,13 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                                         <input
                                             type="checkbox"
                                             id="non_trouvee"
-                                            disabled={isViewMode}
+                                            disabled={effectiveIsViewMode}
                                             {...register("non_trouvee")}
                                             className="w-5 h-5 text-blue-600 rounded border-gray-300 accent-blue-600"
                                         />
                                         <label
                                             htmlFor="non_trouvee"
-                                            className={`text-sm lg:text-base font-medium ${isViewMode
+                                            className={`text-sm lg:text-base font-medium ${effectiveIsViewMode
                                                 ? (isNonTrouveeChecked ? 'text-blue-950 font-bold cursor-default' : 'text-gray-400 cursor-default')
                                                 : 'text-gray-800 cursor-pointer'
                                                 }`}
@@ -127,7 +144,7 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                             <div className="p-4 lg:p-5 bg-blue-50/50 rounded-xl border border-blue-100 space-y-4">
                                 <div className="flex justify-between items-center">
                                     <div><span className="font-semibold text-gray-800 lg:text-lg">Positionnement cartographique</span></div>
-                                    {!isViewMode && (
+                                    {!effectiveIsViewMode && (
                                         <button type="button" onClick={handleCaptureLocation} disabled={location.loading} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium shadow-sm transition-colors">
                                             {location.loading ? 'Recherche...' : '📍 Capturer position'}
                                         </button>
@@ -140,7 +157,11 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                                             <MapContainer center={[activeCoords.lat, activeCoords.lon]} zoom={18} style={{ height: '100%', width: '100%' }}>
                                                 <ZoomIndicator />
                                                 <MapRecenter center={[activeCoords.lat, activeCoords.lon]} />
-                                                <MapClickHandler onMapClick={(lat: number, lon: number) => fetchAddressAndCadastre(lat, lon)} />
+
+                                                {!effectiveIsViewMode && (
+                                                    <MapClickHandler onMapClick={(lat: number, lon: number) => fetchAddressAndCadastre(lat, lon)} />
+                                                )}
+
                                                 <OfflineMapManager />
                                                 <LayersControl position="topright">
                                                     <LayersControl.BaseLayer checked name="Satellite (IGN)"><TileLayer url="https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}" maxZoom={19} /></LayersControl.BaseLayer>
@@ -202,7 +223,7 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                             <div className="pt-5 border-t border-gray-200 mt-5">
                                 <div className="flex justify-between items-center mb-4 bg-gray-50 p-3 rounded-lg border border-gray-100">
                                     <span className="block text-sm lg:text-base font-bold text-gray-800">Repères fixes du terrain & Distances ({reperesList.length})</span>
-                                    {!isViewMode && (
+                                    {!effectiveIsViewMode && (
                                         <button type="button" onClick={() => setIsRepereModalOpen(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm lg:text-base font-medium shadow-sm hover:bg-green-700 transition-colors">+ Ajouter un repère</button>
                                     )}
                                 </div>
@@ -210,7 +231,7 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                                     {reperesList.map((rep: any, idx: number) => (
                                         <div key={idx} className="flex justify-between items-center p-3.5 bg-white border border-gray-200 rounded-lg text-sm lg:text-base shadow-sm">
                                             <div><span className="font-bold text-blue-800">{rep.point}</span> : {rep.description} — {rep.distance} cm</div>
-                                            {!isViewMode && (
+                                            {!effectiveIsViewMode && (
                                                 <button type="button" onClick={() => handleRemoveRepere(idx)} className="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded p-1.5 transition-colors font-bold">✕</button>
                                             )}
                                         </div>
@@ -222,7 +243,7 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                                 <div className="lg:col-span-3">
                                     <div className="flex justify-between items-center mb-2">
                                         <label className="block text-sm lg:text-sm font-semibold text-gray-700">Observations / Accès</label>
-                                        {!isViewMode && (
+                                        {!effectiveIsViewMode && (
                                             <button type="button" onClick={() => toggleDictation('observations_localisation')} className={`text-xs lg:text-sm px-3 py-1.5 rounded-full border shadow-sm transition-colors ${listeningField === 'observations_localisation' ? 'bg-red-600 text-white animate-pulse border-red-600' : 'bg-white hover:bg-gray-50'}`}>
                                                 🎤 Dicter
                                             </button>
@@ -240,7 +261,7 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                                                     <img src="/Drapeaux.png" alt="Drapeau situation" className="w-full h-auto" />
                                                 </div>
                                             )}
-                                            {!isViewMode && (
+                                            {!effectiveIsViewMode && (
                                                 <button type="button" onClick={(e) => { e.stopPropagation(); handleRemovePhoto('photo_situation'); }} className="absolute top-3 right-3 bg-red-600 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold shadow-lg z-30 opacity-90 hover:opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">✕</button>
                                             )}
                                         </div>
@@ -285,7 +306,6 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                                             <input {...register("dimensions")} list="dimensions-suggestions" autoComplete="off" className={`w-full p-3 lg:p-2.5 border rounded-lg text-lg lg:text-base transition-colors ${getFieldBg('dimensions')}`} placeholder={formeSelectionnee === 'Circulaire' ? "Ex: Ø 600" : "Ex: 80 x 80"} />
                                             <datalist id="dimensions-suggestions">{existingDimensions.map((dim: string, idx: number) => <option key={idx} value={dim} />)}</datalist>
                                         </div>
-                                        {/* Sur PC, l'affleurement prend 2 colonnes au lieu de s'étaler sur 4 */}
                                         <div className="md:col-span-2 lg:col-span-2">
                                             <label className="block text-sm lg:text-sm font-semibold text-gray-700 mb-1.5">Affleurement</label>
                                             <select {...register("affleurement")} className={`w-full p-3 lg:p-2.5 border rounded-lg text-lg lg:text-base transition-colors ${getFieldBg('affleurement')}`}>
@@ -298,7 +318,7 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                                         {photoPreviews.photo_couvercle ? (
                                             <div onClick={() => setEnlargedPhotoUrl(photoPreviews.photo_couvercle)} className="relative inline-block bg-gray-50 p-1.5 rounded-xl border shadow-sm cursor-pointer hover:ring-4 hover:ring-blue-300 transition-all group">
                                                 <img src={photoPreviews.photo_couvercle} alt="Couvercle" className="h-32 w-32 lg:h-40 lg:w-40 object-cover rounded-lg block" />
-                                                {!isViewMode && (
+                                                {!effectiveIsViewMode && (
                                                     <button type="button" onClick={(e) => { e.stopPropagation(); handleRemovePhoto('photo_couvercle'); }} className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold shadow-lg z-30 opacity-90 hover:opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">✕</button>
                                                 )}
                                             </div>
@@ -334,7 +354,6 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                             {/* 4 - CONDUITS */}
                             <section className="bg-white p-4 lg:p-8 rounded-xl shadow-sm lg:shadow border border-gray-200 transition-shadow duration-300 hover:shadow-md space-y-6">
                                 <h2 className="text-xl lg:text-2xl font-bold text-blue-800 border-b pb-3">4 - Conduits</h2>
-                                {/* Grille optimisée à 3 colonnes sur PC pour 6 éléments = 2 lignes propres */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 lg:gap-6">
                                     <div><label className="block text-sm lg:text-sm font-semibold text-gray-700 mb-1.5">Matériau</label><select {...register("materiau_conduit")} className={`w-full p-3 lg:p-2.5 border rounded-lg text-base lg:text-base bg-white ${getFieldBg('materiau_conduit')}`}><option value="">Sélectionner...</option><option value="PVC">PVC</option><option value="Béton">Béton</option><option value="Fonte">Fonte</option><option value="Grès">Grès</option><option value="Maçonné">Maçonné</option></select></div>
                                     <div><label className="block text-sm lg:text-sm font-semibold text-gray-700 mb-1.5">Profondeur (cm)</label><input type="number" {...register("profondeur_cm", { valueAsNumber: true })} className={`w-full p-3 lg:p-2.5 border rounded-lg text-base lg:text-base bg-white ${getFieldBg('profondeur_cm')}`} /></div>
@@ -345,7 +364,7 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                                 </div>
                                 <div className="pt-2">
                                     <div className="flex justify-between items-center mb-2"><label className="block text-sm lg:text-sm font-semibold text-gray-700">Observations</label>
-                                        {!isViewMode && (
+                                        {!effectiveIsViewMode && (
                                             <button type="button" onClick={() => toggleDictation('observations_physiques')} className={`text-xs lg:text-sm px-3 py-1.5 rounded-full border shadow-sm transition-colors ${listeningField === 'observations_physiques' ? 'bg-red-600 text-white animate-pulse border-red-600' : 'bg-white hover:bg-gray-50'}`}>
                                                 🎤 Dicter
                                             </button>
@@ -359,14 +378,13 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                                         {photoPreviews.photos_interieur.map((preview: string, idx: number) => (
                                             <div key={idx} onClick={() => setEnlargedPhotoUrl(preview)} className="relative bg-gray-50 p-1.5 rounded-xl border shadow-sm cursor-pointer hover:ring-4 hover:ring-blue-300 transition-all group">
                                                 <img src={preview} alt={`Intérieur ${idx + 1}`} className="h-28 w-28 lg:h-36 lg:w-36 object-cover rounded-lg block" />
-                                                {!isViewMode && (
+                                                {!effectiveIsViewMode && (
                                                     <button type="button" onClick={(e) => { e.stopPropagation(); handleRemovePhoto('photos_interieur', idx); }} className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-7 h-7 flex items-center justify-center font-bold shadow-lg z-30 opacity-90 hover:opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">✕</button>
                                                 )}
                                             </div>
                                         ))}
 
-                                        {/* On masque le bouton d'ajout si on est en mode affichage */}
-                                        {!isViewMode && (
+                                        {!effectiveIsViewMode && (
                                             <label className="flex flex-col items-center justify-center h-28 w-28 lg:h-36 lg:w-36 border-2 border-dashed border-blue-200 rounded-xl cursor-pointer bg-blue-50/50 hover:bg-blue-100 transition-colors">
                                                 <span className="text-2xl lg:text-3xl mb-1">📷</span>
                                                 <input type="file" accept="image/*" multiple capture="environment" onChange={(e) => handlePhotoCapture('photos_interieur', e)} className="hidden" />
@@ -381,28 +399,27 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                                 <h2 className="text-xl lg:text-2xl font-bold mb-5 text-blue-800 border-b pb-3">5 - Action(s) préconisée(s)</h2>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 lg:gap-4">
                                     {["R.A.S.", "Curage / Nettoyage", "Débouchage / Dégorgement", "Remplacement du tampon", "Réparation du cadre", "Remise à niveau de l'arase", "Traitement des infiltrations", "Dégagement d'accès", "Reprise de raccordement", "Traitement anti-corrosion / Réfection", "Dégrippage / Déblocage"].map((action, idx) => {
-                                        // Vérifie si l'action fait partie des éléments cochés
                                         const isChecked = watch("actions_preconisees")?.includes(action);
 
                                         return (
                                             <label
                                                 key={idx}
-                                                className={`flex items-center gap-3 p-3 lg:p-3 border rounded-lg transition-colors shadow-sm ${isViewMode
+                                                className={`flex items-center gap-3 p-3 lg:p-3 border rounded-lg transition-colors shadow-sm ${effectiveIsViewMode
                                                     ? (isChecked
-                                                        ? 'bg-blue-100/90 border-blue-400 text-blue-950 font-semibold shadow-inner' // Style bien visible si coché en affichage
-                                                        : 'bg-gray-100/60 border-gray-200 text-gray-400 opacity-60'   // Grisé discret si non coché en affichage
+                                                        ? 'bg-blue-100/90 border-blue-400 text-blue-950 font-semibold shadow-inner'
+                                                        : 'bg-gray-100/60 border-gray-200 text-gray-400 opacity-60'
                                                     )
-                                                    : 'hover:bg-blue-50 cursor-pointer bg-gray-50' // Style normal en mode saisie/édition
+                                                    : 'hover:bg-blue-50 cursor-pointer bg-gray-50'
                                                     }`}
                                             >
                                                 <input
                                                     type="checkbox"
                                                     value={action}
-                                                    disabled={isViewMode} // Désactive l'interaction en mode affichage
+                                                    disabled={effectiveIsViewMode}
                                                     {...register("actions_preconisees")}
                                                     className="w-5 h-5 lg:w-4 lg:h-4 text-blue-600 rounded border-gray-300 accent-blue-600"
                                                 />
-                                                <span className={`font-medium lg:text-sm ${isViewMode ? (isChecked ? 'text-blue-950 font-bold' : 'text-gray-400') : 'text-gray-800'}`}>
+                                                <span className={`font-medium lg:text-sm ${effectiveIsViewMode ? (isChecked ? 'text-blue-950 font-bold' : 'text-gray-400') : 'text-gray-800'}`}>
                                                     {action}
                                                 </span>
                                             </label>
@@ -412,7 +429,7 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                                 <div className="pt-6">
                                     <div className="flex justify-between items-center mb-2">
                                         <label className="block text-sm lg:text-sm font-semibold text-gray-700">Précisions</label>
-                                        {!isViewMode && (
+                                        {!effectiveIsViewMode && (
                                             <button type="button" onClick={() => toggleDictation('action_precision')} className={`text-sm lg:text-sm px-3 py-1.5 rounded-full border shadow-sm transition-colors ${listeningField === 'action_precision' ? 'bg-red-600 text-white animate-pulse border-red-600' : 'bg-white hover:bg-gray-50'}`}>
                                                 🎤 Dicter
                                             </button>
@@ -423,22 +440,28 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
                             </section>
                         </>
                     )}
-                </fieldset> {/* FIN DU FIELDSET QUI VERROUILLE LE FORMULAIRE */}
+                </fieldset>
 
-                {/* Barre d'action fixe en bas avec arrière-plan flouté et bouton centré sur grand écran */}
+                {/* Barre d'action fixe en bas */}
                 <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/95 backdrop-blur-sm border-t border-gray-200 shadow-[0_-10px_25px_-5px_rgba(0,0,0,0.1)] z-40">
                     <div className="max-w-6xl mx-auto flex justify-center">
-                        {isViewMode ? (
-                            <button
-                                type="button"
-                                onClick={(e) => {
-                                    e.preventDefault(); // 👈 Stoppe net toute propagation ou action par défaut
-                                    setIsViewMode(false);
-                                }}
-                                className="w-full md:w-3/4 lg:w-1/2 py-4 lg:py-3 rounded-xl text-xl lg:text-lg font-bold text-white shadow-md bg-blue-600 hover:bg-blue-700 transition-colors"
-                            >
-                                ✏️ Passer en mode modification
-                            </button>
+                        {effectiveIsViewMode ? (
+                            canEdit ? (
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        setIsViewMode(false);
+                                    }}
+                                    className="w-full md:w-3/4 lg:w-1/2 py-4 lg:py-3 rounded-xl text-xl lg:text-lg font-bold text-white shadow-md bg-blue-600 hover:bg-blue-700 transition-colors"
+                                >
+                                    ✏️ Passer en mode modification
+                                </button>
+                            ) : (
+                                <div className="w-full md:w-3/4 lg:w-1/2 py-3 px-4 rounded-xl text-sm lg:text-base font-semibold text-gray-600 bg-gray-100 border border-gray-300 text-center shadow-sm">
+                                    🔒 Mode lecture seule (Connexion requise pour modifier)
+                                </div>
+                            )
                         ) : (
                             <button
                                 type="submit"
@@ -453,7 +476,7 @@ export const SaisieTab = ({ saisieState, isOnline }: any) => {
             </form>
 
             <RepereModal isOpen={isRepereModalOpen} onClose={() => setIsRepereModalOpen(false)} currentRepere={currentRepere} setCurrentRepere={setCurrentRepere} onAddRepere={handleAddRepere} toggleDictation={toggleDictation} />
-            <FlagEditModal isOpen={isFlagEditModalOpen} onClose={() => setIsFlagEditModalOpen(false)} photoPreviewUrl={photoPreviews.photo_situation} showSituationFlag={showSituationFlag} setShowSituationFlag={setShowSituationFlag} flagSize={flagSize} setFlagSize={setFlagSize} situationFlagPos={situationFlagPos} situationImageRef={situationImageRef} handlePointerDown={handlePointerDown} handlePointerMove={handlePointerMove} handlePointerUp={handlePointerUp} isViewMode={isViewMode} />
+            <FlagEditModal isOpen={isFlagEditModalOpen} onClose={() => setIsFlagEditModalOpen(false)} photoPreviewUrl={photoPreviews.photo_situation} showSituationFlag={showSituationFlag} setShowSituationFlag={setShowSituationFlag} flagSize={flagSize} setFlagSize={setFlagSize} situationFlagPos={situationFlagPos} situationImageRef={situationImageRef} handlePointerDown={handlePointerDown} handlePointerMove={handlePointerMove} handlePointerUp={handlePointerUp} isViewMode={effectiveIsViewMode} />
 
             {enlargedPhotoUrl && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4 lg:p-12" onClick={() => setEnlargedPhotoUrl(null)}>

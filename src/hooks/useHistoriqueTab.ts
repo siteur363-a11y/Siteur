@@ -39,7 +39,7 @@ export function useHistoriqueTab(
         finally { setIsDeleting(false); }
     };
 
-    const handleExportExcel = async (record: any) => {
+const handleExportExcel = async (record: any) => {
         try {
             setExportingId(record.id || record.id_ouvrage || null);
             await exportRecolementToExcel(record);
@@ -47,9 +47,33 @@ export function useHistoriqueTab(
         finally { setExportingId(null); }
     };
 
+    const toggleAffichage = async (record: any, newValue: boolean) => {
+        if (!isOnline) {
+            showToast("Connexion internet requise pour modifier l'affichage.", 'error');
+            return;
+        }
+        try {
+            // Identification de la bonne clé primaire (comme pour la suppression)
+            const searchColumn = (typeof record.id === 'number' || (typeof record.id === 'string' && /^[0-9a-fA-F-]{36}$/.test(record.id))) ? 'id' : 'id_ouvrage';
+            
+            const { error } = await supabase
+                .from('recolements_boites')
+                .update({ affichage: newValue })
+                .eq(searchColumn, record[searchColumn]);
+
+            if (error) throw new Error(error.message);
+
+            // Mise à jour de l'état local pour refléter le changement instantanément
+            setHistorique(prev => prev.map(r => r[searchColumn] === record[searchColumn] ? { ...r, affichage: newValue } : r));
+            showToast("Statut d'affichage mis à jour.", 'success');
+        } catch (err: any) { 
+            showToast(`Échec mise à jour: ${err.message}`, 'error'); 
+        }
+    };
+
     return {
         historique, filterDate, setFilterDate, filterCommune, setFilterCommune, filterNumero, setFilterNumero,
         filterRue, setFilterRue, filterNonTrouvee, setFilterNonTrouvee, exportingId, recordToDelete, setRecordToDelete,
-        isDeleting, executeDelete, handleExportExcel
+        isDeleting, executeDelete, handleExportExcel, toggleAffichage
     };
 }

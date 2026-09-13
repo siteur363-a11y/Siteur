@@ -23,10 +23,10 @@ function MapFitBounds({ markers }: { markers: { latitude: number; longitude: num
         const validMarkers = markers.filter((m) => typeof m.latitude === 'number' && typeof m.longitude === 'number');
         if (validMarkers.length > 0) {
             map.fitBounds(
-                validMarkers.map((m) => [m.latitude, m.longitude] as [number, number]), 
-                { 
+                validMarkers.map((m) => [m.latitude, m.longitude] as [number, number]),
+                {
                     padding: [10, 10],
-                    maxZoom: 19 
+                    maxZoom: 19
                 }
             );
         }
@@ -43,7 +43,8 @@ export const CarteTab = ({
     filterCommune, setFilterCommune,
     filterNumero, setFilterNumero,
     filterRue, setFilterRue,
-    filterNonTrouvee, setFilterNonTrouvee
+    filterNonTrouvee, setFilterNonTrouvee,
+    userEmail 
 }: any) => {
     // 1. Valeurs uniques pour les filtres
     const uniqueDates = useMemo(() => Array.from(new Set(historique.map((rec: any) => rec.date_recolement).filter(Boolean))).sort((a: any, b: any) => b.localeCompare(a)), [historique]);
@@ -51,9 +52,16 @@ export const CarteTab = ({
     const uniqueNumeros = useMemo(() => Array.from(new Set(historique.map((rec: any) => rec.voie_numero).filter(Boolean))).sort((a: any, b: any) => a.localeCompare(b, undefined, { numeric: true })), [historique]);
     const uniqueRues = useMemo(() => Array.from(new Set(historique.map((rec: any) => rec.voie_nom).filter(Boolean))).sort((a: any, b: any) => a.localeCompare(b, 'fr', { sensitivity: 'base' })), [historique]);
 
-    // 2. Application des filtres communs sur la carte
+// 2. Application des filtres communs sur la carte
     const filteredMapRecords = useMemo(() => {
+        const isSuperAdmin = userEmail === 'sebastien.guedes@gmail.com';
+
         return historique.filter((rec: any) => {
+            // 1. Règle de visibilité : Tout afficher pour l'admin, uniquement 'affichage: true' pour les autres
+            const matchAffichage = isSuperAdmin ? true : Boolean(rec.affichage);
+            if (!matchAffichage) return false;
+
+            // 2. Filtres existants
             const matchDate = filterDate ? rec.date_recolement === filterDate : true;
             const matchCommune = filterCommune ? rec.commune === filterCommune : true;
             const matchNumero = filterNumero ? rec.voie_numero === filterNumero : true;
@@ -63,9 +71,12 @@ export const CarteTab = ({
             if (filterNonTrouvee === 'trouve') matchNonTrouvee = !rec.non_trouvee;
             else if (filterNonTrouvee === 'non_trouve') matchNonTrouvee = !!rec.non_trouvee;
 
-            return matchDate && matchCommune && matchNumero && matchRue && matchNonTrouvee;
+            // 3. Protection critique Leaflet : ne garder que les points qui ont des coordonnées valides
+            const hasCoords = rec.latitude != null && rec.longitude != null;
+
+            return matchDate && matchCommune && matchNumero && matchRue && matchNonTrouvee && hasCoords;
         });
-    }, [historique, filterDate, filterCommune, filterNumero, filterRue, filterNonTrouvee]);
+    }, [historique, filterDate, filterCommune, filterNumero, filterRue, filterNonTrouvee, userEmail]);
 
     return (
         <div className="space-y-6 max-w-6xl mx-auto w-full pb-12">
@@ -152,11 +163,11 @@ export const CarteTab = ({
             ) : (
                 <div className="bg-white p-2 lg:p-4 rounded-xl shadow-sm lg:shadow border border-gray-200 transition-shadow duration-300 hover:shadow-md">
                     <div className="h-[calc(100vh-280px)] min-h-[420px] w-full rounded-xl overflow-hidden border border-gray-300 shadow-inner relative z-0">
-                        <MapContainer 
-                            center={[49.27, 0.96]} 
-                            zoom={12} 
-                            zoomSnap={0.25}  
-                            zoomDelta={0.5}  
+                        <MapContainer
+                            center={[49.27, 0.96]}
+                            zoom={12}
+                            zoomSnap={0.25}
+                            zoomDelta={0.5}
                             style={{ height: '100%', width: '100%' }}
                         >
                             <ZoomIndicator />
@@ -171,31 +182,31 @@ export const CarteTab = ({
                             </LayersControl>
                             {filteredMapRecords.length > 0 && <MapFitBounds markers={filteredMapRecords} />}
                             {filteredMapRecords.map((record: any) => (
-<Marker 
-    key={record.id || record.id_ouvrage}
-    position={[record.latitude, record.longitude]}
-    icon={record.non_trouvee ? redIcon : blueIcon}
->
-    <Popup>
-        <div className="p-1 space-y-2 min-w-[180px]">
-            <div className="font-bold text-blue-900 border-b pb-1 text-sm">{record.id_ouvrage}</div>
-            <div className="text-xs text-gray-700 space-y-1">
-                <div className="flex items-start gap-1">
-                    <span>📍</span>
-                    <div className="font-medium">
-                        {(record.voie_numero || record.voie_nom) && <div>{[record.voie_numero, record.voie_nom].filter(Boolean).join(' ')}</div>}
-                        {(record.code_postal || record.commune) && <div>{[record.code_postal, record.commune].filter(Boolean).join(' ')}</div>}
-                        {!record.voie_nom && !record.commune && <div>Adresse N.R.</div>}
-                    </div>
-                </div>
-                <p>📅 {record.date_recolement ? new Date(record.date_recolement).toLocaleDateString('fr-FR') : 'Date N.R.'}</p>
-            </div>
-            <button type="button" onClick={() => handleEditRecord(record, 'view')} className="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-1.5 px-3 rounded text-xs transition-colors shadow flex items-center justify-center gap-1 cursor-pointer">
-                🔍 Afficher
-            </button>
-        </div>
-    </Popup>
-</Marker>
+                                <Marker
+                                    key={record.id || record.id_ouvrage}
+                                    position={[record.latitude, record.longitude]}
+                                    icon={record.non_trouvee ? redIcon : blueIcon}
+                                >
+                                    <Popup>
+                                        <div className="p-1 space-y-2 min-w-[180px]">
+                                            <div className="font-bold text-blue-900 border-b pb-1 text-sm">{record.id_ouvrage}</div>
+                                            <div className="text-xs text-gray-700 space-y-1">
+                                                <div className="flex items-start gap-1">
+                                                    <span>📍</span>
+                                                    <div className="font-medium">
+                                                        {(record.voie_numero || record.voie_nom) && <div>{[record.voie_numero, record.voie_nom].filter(Boolean).join(' ')}</div>}
+                                                        {(record.code_postal || record.commune) && <div>{[record.code_postal, record.commune].filter(Boolean).join(' ')}</div>}
+                                                        {!record.voie_nom && !record.commune && <div>Adresse N.R.</div>}
+                                                    </div>
+                                                </div>
+                                                <p>📅 {record.date_recolement ? new Date(record.date_recolement).toLocaleDateString('fr-FR') : 'Date N.R.'}</p>
+                                            </div>
+                                            <button type="button" onClick={() => handleEditRecord(record, 'view')} className="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-1.5 px-3 rounded text-xs transition-colors shadow flex items-center justify-center gap-1 cursor-pointer">
+                                                🔍 Afficher
+                                            </button>
+                                        </div>
+                                    </Popup>
+                                </Marker>
                             ))}
                         </MapContainer>
                     </div>

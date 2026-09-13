@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 
-export function useMapTab(isOnline: boolean, activeTab: string) {
+export function useMapTab(isOnline: boolean, activeTab: string, userEmail?: string | null) {
     const [mapRecords, setMapRecords] = useState<any[]>([]);
     const [isLoadingMap, setIsLoadingMap] = useState<boolean>(false);
     const [mapFilterStatus, setMapFilterStatus] = useState<string>('tous');
@@ -18,6 +18,13 @@ export function useMapTab(isOnline: boolean, activeTab: string) {
     useEffect(() => { if (activeTab === 'carte' && isOnline) fetchMapRecords(); }, [activeTab, isOnline, fetchMapRecords]);
 
     const filteredMapRecords = mapRecords.filter((record) => {
+        // 1. Visibilité : tous les ouvrages pour l'admin, uniquement les 'affichage = true' pour les autres
+        const isSuperAdmin = userEmail === 'sebastien.guedes@gmail.com';
+        if (!isSuperAdmin && !record.affichage) {
+            return false;
+        }
+
+        // 2. Filtres par statut d'ouvrage
         if (mapFilterStatus === 'trouve') return !record.non_trouvee;
         if (mapFilterStatus === 'non_trouve') return Boolean(record.non_trouvee);
         return true;
